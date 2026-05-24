@@ -1,4 +1,4 @@
-let# ScaleChat API
+let ScaleChat API
 
 NestJS + Fastify backend for ScaleChat. Current scope:
 

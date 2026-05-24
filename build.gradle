@@ -5,7 +5,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        // Add dependencies here if needed
+        // Add common dependencies here
     }
 }
 
