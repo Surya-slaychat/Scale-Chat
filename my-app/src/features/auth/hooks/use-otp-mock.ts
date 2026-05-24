@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 
-import { mockAuthRepository } from '../data/mock-auth-repository';
+import { authRepository } from '../data';
 import type { OtpVerifyResult } from '../data/types';
 
 type RequestState = 'idle' | 'sending' | 'sent' | 'error';
@@ -13,7 +13,7 @@ export function useOtpMock() {
   const requestOtp = useCallback(async (phoneE164: string) => {
     setRequestState('sending');
     try {
-      await mockAuthRepository.requestOtp(phoneE164);
+      await authRepository.requestOtp(phoneE164);
       setRequestState('sent');
       return { ok: true as const };
     } catch (err) {
@@ -26,7 +26,7 @@ export function useOtpMock() {
     async (phoneE164: string, code: string, deviceId: string): Promise<OtpVerifyResult> => {
       setVerifyState('verifying');
       try {
-        const result = await mockAuthRepository.verifyOtp({ phoneE164, code, deviceId });
+        const result = await authRepository.verifyOtp({ phoneE164, code, deviceId });
         setVerifyState(result.ok ? 'success' : 'invalid');
         return result;
       } catch (err) {

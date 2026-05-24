@@ -1,0 +1,220 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import { chatSocket } from '@/lib/chat-socket';
+
+import { chatRepository } from '../data';
+import type { Message, Thread } from '../types';
+
+export type PeerPresence = {
+  isOnline: boolean;
+  lastSeenAt: string | null;
+};
+
+/**
+ * Reactive view of one thread + its messages, driven by the repo's pub/sub.
+ *
+ * Adds WhatsApp-style live state on top of the message cache:
+ *   - `replyingTo`: which message the composer is quoting (null = normal send)
+ *   - `peerTyping`: true when the gateway's `typing:update` for the peer fires
+ *     and hasn't gone stale (server enforces a 5s TTL; we lower it client-side
+ *     to 4.5s so the indicator can't out-live the server's grace window)
+ *   - `peerPresence`: { isOnline, lastSeenAt } from the gateway's presence
+ *     stream. Bootstraps via `presence:request`, then live-updates on each
+ *     `presence:update`.
+ *
+ * Optimistic send is handled inside the repo (`sendMessage` writes a `sending`
+ * row to the cache and notifies before the network round-trip). Optimistic
+ * delete (tombstone) is the same — the repo flips `deletedAt` immediately.
+ */
+export function useThread(threadId: string | undefined): {
+  thread: Thread | null;
+  messages: Message[];
+  loading: boolean;
+  loadingOlder: boolean;
+  hasMoreOlder: boolean;
+  send: (text: string) => Promise<void>;
+  loadOlder: () => Promise<void>;
+  /** Set the reply target; pass null to clear. */
+  replyTo: (message: Message | null) => void;
+  replyingTo: Message | null;
+  deleteMessage: (messageId: string) => Promise<void>;
+  /** Call on every keystroke; we debounce + rate-limit internally. */
+  notifyTyping: () => void;
+  peerTyping: boolean;
+  peerPresence: PeerPresence;
+} {
+  const [thread, setThread] = useState<Thread | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [peerTyping, setPeerTyping] = useState(false);
+  const [peerPresence, setPeerPresence] = useState<PeerPresence>({
+    isOnline: false,
+    lastSeenAt: null,
+  });
+
+  // Refs for managing typing emit throttle + receiver expiry.
+  const lastTypingEmittedAtRef = useRef(0);
+  const peerTypingExpiryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ─── Data load + repo subscription ──────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refresh() {
+      if (!threadId) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      try {
+        const [nextThread, nextMessages] = await Promise.all([
+          chatRepository.getThread(threadId),
+          chatRepository.listMessages(threadId),
+        ]);
+        if (cancelled) return;
+        setThread(nextThread);
+        setMessages(nextMessages);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    refresh();
+    const unsub = chatRepository.subscribe(refresh);
+    if (threadId) chatRepository.markThreadRead(threadId);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [threadId]);
+
+  // ─── Typing receiver: subscribe to gateway typing:update ───────────────────
+  useEffect(() => {
+    if (!threadId || !thread) return;
+    const counterpartId = thread.counterpart.id;
+
+    const unsub = chatSocket.onTyping((t) => {
+      if (t.chatId !== threadId) return;
+      if (t.userId !== counterpartId) return;
+      if (!t.isTyping) {
+        setPeerTyping(false);
+        return;
+      }
+      setPeerTyping(true);
+      if (peerTypingExpiryRef.current) clearTimeout(peerTypingExpiryRef.current);
+      // Server TTL is 5s; we expire slightly earlier so we never lag the server.
+      peerTypingExpiryRef.current = setTimeout(() => setPeerTyping(false), 4_500);
+    });
+    return () => {
+      unsub();
+      if (peerTypingExpiryRef.current) clearTimeout(peerTypingExpiryRef.current);
+    };
+  }, [threadId, thread]);
+
+  // ─── Presence: bootstrap + subscribe to updates ────────────────────────────
+  useEffect(() => {
+    if (!thread) return;
+    const counterpartId = thread.counterpart.id;
+    let cancelled = false;
+
+    void chatSocket.requestPresence([counterpartId]).then((items) => {
+      if (cancelled) return;
+      const me = items.find((i) => i.userId === counterpartId);
+      if (me) setPeerPresence({ isOnline: me.isOnline, lastSeenAt: me.lastSeenAt });
+    });
+
+    const unsub = chatSocket.onPresence((p) => {
+      if (p.userId !== counterpartId) return;
+      setPeerPresence({ isOnline: p.isOnline, lastSeenAt: p.lastSeenAt });
+    });
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [thread]);
+
+  // ─── Send ──────────────────────────────────────────────────────────────────
+  const send = useCallback(
+    async (text: string) => {
+      if (!threadId) return;
+      const trimmed = text.trim();
+      if (trimmed.length === 0) return;
+      const replyId = replyingTo?.id;
+      // Clear the reply chip BEFORE we await so the composer re-renders cleanly
+      // even if the server is slow.
+      setReplyingTo(null);
+      try {
+        await chatRepository.sendMessage({
+          threadId,
+          type: 'text',
+          text: trimmed,
+          clientMessageId: `c-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+          replyToMessageId: replyId,
+        });
+      } catch {
+        // The repo has already marked the optimistic row as failed and notified.
+      }
+    },
+    [threadId, replyingTo]
+  );
+
+  // ─── Load older ────────────────────────────────────────────────────────────
+  const loadOlder = useCallback(async () => {
+    if (!threadId || loadingOlder || !hasMoreOlder) return;
+    const fn = chatRepository.loadOlder;
+    if (!fn) return;
+    setLoadingOlder(true);
+    try {
+      const res = await fn.call(chatRepository, threadId);
+      setHasMoreOlder(res.hasMore);
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [threadId, loadingOlder, hasMoreOlder]);
+
+  // ─── Delete ────────────────────────────────────────────────────────────────
+  const deleteMessage = useCallback(
+    async (messageId: string) => {
+      if (!threadId) return;
+      const fn = chatRepository.deleteMessage;
+      if (!fn) return;
+      await fn.call(chatRepository, threadId, messageId);
+    },
+    [threadId]
+  );
+
+  // ─── Reply state setter ────────────────────────────────────────────────────
+  const replyTo = useCallback((message: Message | null) => {
+    setReplyingTo(message);
+  }, []);
+
+  // ─── Typing emitter (rate-limited) ─────────────────────────────────────────
+  const notifyTyping = useCallback(() => {
+    if (!threadId) return;
+    const now = Date.now();
+    // Server enforces a 5s TTL; emit at most every 2.5s so we refresh the
+    // window without flooding the socket.
+    if (now - lastTypingEmittedAtRef.current < 2_500) return;
+    lastTypingEmittedAtRef.current = now;
+    chatSocket.emitTyping(threadId);
+  }, [threadId]);
+
+  return {
+    thread,
+    messages,
+    loading,
+    loadingOlder,
+    hasMoreOlder,
+    send,
+    loadOlder,
+    replyTo,
+    replyingTo,
+    deleteMessage,
+    notifyTyping,
+    peerTyping,
+    peerPresence,
+  };
+}

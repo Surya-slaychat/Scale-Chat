@@ -1,12 +1,12 @@
 import { Feather } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
+import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Brand, Spacing } from '@/constants/theme';
+import { Brand, FontWeight, Radius, Spacing } from '@/constants/theme';
 import { PickerPill } from '@/features/auth/components/picker-pill';
 import { PillButton } from '@/features/auth/components/pill-button';
 import { AuthCopy } from '@/features/auth/copy';
@@ -23,20 +23,26 @@ export default function TermsScreen() {
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.iconCard}>
-          <View style={styles.lockBg}>
-            <Feather name="lock" size={40} color="#FFFFFF" />
+          {/* Three translucent concentric circles → centre lock + check badge. */}
+          <View style={[styles.ring, styles.ringOuter]} />
+          <View style={[styles.ring, styles.ringMiddle]} />
+          <View style={[styles.ring, styles.ringInner]}>
+            <Feather name="lock" size={42} color="#FFFFFF" />
+            <View style={styles.checkBadge}>
+              <Feather name="check" size={12} color={Brand.cardWelcome} />
+            </View>
           </View>
         </View>
 
         <View style={styles.body}>
           <ThemedText style={[styles.line, { color: theme.text }]}>
-            By signing up, you agree to {AuthCopy.brand}&apos;s{' '}
+            {AuthCopy.terms.line1Lead}{' '}
             <ThemedText
               style={[styles.link, { color: Brand.primary }]}
               onPress={() => Linking.openURL(PRIVACY_URL)}>
               {AuthCopy.terms.privacyLabel}
             </ThemedText>{' '}
-            and{' '}
+            {AuthCopy.terms.and}{' '}
             <ThemedText
               style={[styles.link, { color: Brand.primary }]}
               onPress={() => Linking.openURL(TERMS_URL)}>
@@ -44,7 +50,7 @@ export default function TermsScreen() {
             </ThemedText>
             .
           </ThemedText>
-          <ThemedText style={[styles.line, { color: theme.textSecondary }]}>
+          <ThemedText style={[styles.line, { color: theme.text }]}>
             {AuthCopy.terms.line2(AuthCopy.brand)}{' '}
             <Pressable
               onPress={() => Linking.openURL(PRIVACY_URL)}
@@ -70,6 +76,8 @@ export default function TermsScreen() {
   );
 }
 
+const ICON_CARD_SIZE = 260;
+
 const styles = StyleSheet.create({
   root: { flex: 1 },
   safe: {
@@ -79,18 +87,42 @@ const styles = StyleSheet.create({
     gap: Spacing.four,
   },
   iconCard: {
-    height: 240,
+    height: ICON_CARD_SIZE,
     backgroundColor: Brand.cardWelcome,
-    borderRadius: 28,
+    borderRadius: Radius.cardLg,
     marginTop: Spacing.three,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  lockBg: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+  ring: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 999,
+  },
+  ringOuter: {
+    width: 180,
+    height: 180,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+  },
+  ringMiddle: {
+    width: 130,
+    height: 130,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  ringInner: {
+    width: 92,
+    height: 92,
+    backgroundColor: 'rgba(255,255,255,0.30)',
+  },
+  checkBadge: {
+    position: 'absolute',
+    right: 4,
+    bottom: 14,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -100,19 +132,21 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.two,
   },
   line: {
-    fontSize: 14,
+    fontSize: 13,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 20,
+    fontWeight: FontWeight.regular,
     paddingHorizontal: Spacing.two,
+    letterSpacing: -0.2,
   },
   link: {
-    fontWeight: '600',
+    fontWeight: FontWeight.semibold,
   },
   languageRow: {
     alignItems: 'center',
     paddingTop: Spacing.two,
   },
   languagePill: {
-    minWidth: 160,
+    minWidth: 140,
   },
 });

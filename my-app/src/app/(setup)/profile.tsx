@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Brand, Spacing } from '@/constants/theme';
+import { Brand, FontWeight, Spacing } from '@/constants/theme';
 import { AvatarPicker } from '@/features/auth/components/avatar-picker';
 import { PillButton } from '@/features/auth/components/pill-button';
 import { PillInput } from '@/features/auth/components/pill-input';
@@ -80,6 +80,7 @@ export default function ProfileScreen() {
             onChangeText={setBio}
             maxLength={160}
             multiline
+            style={styles.bioInput}
           />
         </View>
 
@@ -107,13 +108,18 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 30,
-    fontWeight: '800',
+    fontWeight: FontWeight.heavy,
     textAlign: 'center',
+    lineHeight: 34,
+    letterSpacing: -1.4,
   },
   avatarBlock: {
     alignItems: 'center',
   },
   fields: {
     gap: Spacing.two,
+  },
+  bioInput: {
+    minHeight: 54,
   },
 });

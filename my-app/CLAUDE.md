@@ -41,9 +41,20 @@ See [`../docs/architecture/expo-skills.md`](../docs/architecture/expo-skills.md)
 - Always go through `useTheme()` and `Spacing` from `src/constants/theme.ts`. **Never hard-code colors or spacing.** Extend the palette in `theme.ts` when designs need a new token.
 - **Never use raw `Text` / `View` in screens.** Always `ThemedText` / `ThemedView`.
 
-## 4. Target backend architecture (REFERENCE — NOT YET IMPLEMENTED)
+## 4. Target backend architecture (PARTIALLY IMPLEMENTED — see `../apps/api/`)
 
-This summarizes the backend architecture designed by the founder's collaborator. The Expo client ships first against mocks; this is where it's heading. Frontend choices on this page (MMKV, zod, secure-store, single-flight refresh) flow from this design — don't drop them just because the backend isn't built yet.
+This summarizes the backend architecture designed by the founder's collaborator. The Expo client ships first against mocks; the NestJS backend is being built in parallel at `../apps/api/`. Frontend choices on this page (MMKV, zod, secure-store, single-flight refresh) flow from this design.
+
+**Implementation status (as of current slice):**
+- ✅ NestJS + Fastify scaffold, Prisma schema (User, RefreshToken, OtpRequest, SecurityEvent, Contact, Chat, ChatMember, Message), Redis client.
+- ✅ `POST /auth/otp/request` — production: MSG91 send, argon2-hashed OTP in Redis, rate limits per phone + IP, audit row.
+- 🚧 `POST /auth/otp/verify` — **STUB.** Returns 501 in prod; in dev (`ENABLE_DEV_OTP=true`) accepts `DEV_OTP_CODE`. Real verify in the next ticket.
+- ✅ `POST /auth/refresh` — RS256 access + opaque refresh, family rotation with replay detection.
+- ✅ `POST /auth/signout` — revokes the refresh family.
+- ✅ `GET /me`, `PATCH /me` — JWT-guarded.
+- ✅ `GET /health`, `GET /ready` — Fly health checks.
+- ✅ Chats REST — `GET /chats`, `POST /chats/one-on-one`, `GET /chats/:chatId`, `GET /chats/:chatId/messages`, `POST /chats/:chatId/messages` (idempotent on `clientMessageId`, per-chat sequence under `pg_advisory_xact_lock`), `PATCH /chats/:id/read|favourite|archive`, `PATCH /chats/read-all`.
+- 🚫 Socket.IO chat gateway, BullMQ workers, Razorpay — Socket.IO push is the next chat ticket; mobile re-fetches on focus + after send today.
 
 ### Stack
 - API + WebSocket gateway: **single NestJS binary** running two scaling profiles (REST is short-lived; Socket.IO is long-lived).
@@ -119,28 +130,53 @@ Product invariant: **a non-admin viewer must never receive a payload containing 
 
 ## 5. Directory layout
 
+**Monorepo root** (since backend work started): `/Scale-Chat/`.
+- npm workspaces, see `/package.json`.
+- `apps/api/` — NestJS backend (this is where the real backend lives now).
+- `packages/shared/` — zod schemas + branded types + phone helpers, imported by both the mobile app (future) and the API.
+- `my-app/` — Expo app (will move to `apps/mobile/` in a later ticket; deliberately not moved yet to keep this diff small).
+
 ```
 my-app/                       # the Expo app (current root)
   src/
     app/                      # expo-router file-based screens
-    components/               # shared visual components (themed-text, themed-view, etc.)
-    constants/                # theme.ts (Colors, Spacing, Fonts)
+      _layout.tsx             # root stack — registers (setup), (tabs), chat
+      index.tsx               # auth-aware redirect to /(tabs), /profile, or /welcome
+      (setup)/                # account-setup flow (welcome → terms → phone → otp → profile → complete)
+      (tabs)/                 # post-setup home; (tabs)/index.tsx = chat list
+      chat/                   # 1-on-1 chat thread screens (outside the tab bar)
+        _layout.tsx
+        [id].tsx              # per-thread screen
+    components/               # shared visual primitives (themed-text, themed-view, …)
+    constants/
+      theme.ts                # Colors, Brand, FontWeight, Radius, Spacing, Fonts
     hooks/                    # use-theme, use-color-scheme
-    features/                 # PLANNED — feature folders
+    features/
+      auth/
+        components/           # PillButton, PillInput, PickerPill, BrandModal,
+                              #   OtpInputGroup, AvatarPicker, WelcomeCard,
+                              #   SuccessBadge, SadFace
+        copy.ts               # all auth strings (i18n-ready)
+        data/                 # AuthRepository interface + mock impl + zod schemas + types
+        hooks/                # use-auth (MMKV-backed), use-otp-mock
       chat/
-        components/           # MessageBubble, ChatRow, ChatHeader, VoiceNotePlayer
-        hooks/                # useThread, useMessages
-        data/                 # repositories + mock store + seed (interface-first)
+        components/           # Avatar, ChatRow, ChatHeader, MessageBubble,
+                              #   DayDivider, Composer
+        copy.ts               # all chat strings
+        data/                 # ChatRepository interface + mock impl + seed
+        hooks/                # use-threads, use-thread
         types.ts              # Message, Thread, Contact (mirror future packages/shared)
-        copy.ts               # all strings, ready for future i18n
-    lib/                      # PLANNED — pure utilities (formatTimestamp, parsePhone, mmkv-store)
-  assets/                     # images, audio, fonts
+    lib/
+      mmkv.ts                 # MMKV singleton + StorageKeys registry
+      phone.ts                # E.164 helpers, India-first validation/formatting
+      format-time.ts          # bubble / thread-row / day-divider timestamp helpers
+  assets/                     # images, fonts, tab icons
 docs/
   brd/                        # Business Requirements Documents per feature
     1-on-1.md                 # current slice
   architecture/               # contributor reference docs
-    expo-skills.md            # the Expo SDK + EAS skills map
-    backend.md                # PLANNED — full friend's architecture doc (verbatim)
+    expo-skills.md            # Expo SDK + EAS skills map
+    backend.md                # PLANNED — full backend architecture doc
 Scalechat Pdf (2).pdf         # canonical pitch (project root)
 ```
 
@@ -150,11 +186,13 @@ Scalechat Pdf (2).pdf         # canonical pitch (project root)
 
 - **Path aliases** (already in `tsconfig.json`): `@/*` → `src/*`, `@/assets/*` → `assets/*`.
 - **File naming:** kebab-case files (`chat-row.tsx`), PascalCase component exports.
-- **Theme tokens** live in `src/constants/theme.ts`. Extend, don't sprinkle. New tokens go in there.
-- **Components must respect dark mode.**
+- **Theme tokens** live in `src/constants/theme.ts` — `Colors` (light/dark), `Brand`, `FontWeight`, `Radius`, `Spacing`. Extend, don't sprinkle. New tokens go in there.
+- **Components must respect dark mode** — the Figma is dark-first.
 - **Never use raw `Text` / `View` from `react-native`** in screens — always `ThemedText` / `ThemedView`.
 - **Strings** live in `features/<feature>/copy.ts`, not inline JSX.
 - **Mock data** is seeded with realistic Indian names + `+91` phones to match the production audience.
+- **OTP length** is `4` digits. Source of truth: `OTP_LENGTH` in `features/auth/components/otp-input-group.tsx` and `OTP_DIGITS` in `features/auth/data/auth-schemas.ts` — keep them in sync.
+- **MMKV keys** are centralised in `src/lib/mmkv.ts` (`StorageKeys`). Never write a raw string key inline.
 
 ## 7. Working agreement
 
@@ -187,9 +225,53 @@ EAS commands (build, update, submit) — see [`../docs/architecture/expo-skills.
 | `app.json` | Expo config: scheme `myapp`, splash `#208AEF`, EAS projectId, typedRoutes + reactCompiler experiments |
 | `eas.json` | development / preview / production build profiles |
 | `tsconfig.json` | `@/*` and `@/assets/*` path aliases |
-| `src/constants/theme.ts` | Colors, Spacing, Fonts — the only place to add design tokens |
+| `src/constants/theme.ts` | Colors / Brand / FontWeight / Radius / Spacing / Fonts — the only place to add design tokens |
 | `src/components/themed-text.tsx` | base text primitive |
 | `src/components/themed-view.tsx` | base view primitive |
+| `src/features/auth/data/auth-repository.ts` | Auth seam (mock impl in same folder) |
+| `src/features/auth/hooks/use-auth.ts` | Reactive auth state (MMKV-backed) |
+| `src/features/chat/data/chat-repository.ts` | Chat seam (mock impl + seed in same folder) |
+| `src/features/chat/hooks/use-threads.ts` / `use-thread.ts` | Thread list + per-thread state |
+| `src/lib/mmkv.ts` | MMKV singleton + `StorageKeys` registry |
+| `src/lib/phone.ts` | India-first phone validation / formatting |
+| `src/lib/format-time.ts` | bubble / thread-row / day-divider timestamps |
 | `../docs/brd/1-on-1.md` | current BRD (1-on-1 messaging slice) |
 | `../docs/architecture/expo-skills.md` | Expo SDK + libraries + EAS workflow map |
 | `../Scalechat Pdf (2).pdf` | canonical pitch deck |
+
+## 10. What's built today (status snapshot)
+
+**Mobile (`my-app/`)** — fully against mocks, pixel-tuned to Figma:
+- Account setup: `welcome` → `terms` → `phone` (confirm + invalid modals) → `otp` (4-digit boxes, error modal) → `profile` → `complete`.
+- Chat list at `(tabs)/index.tsx`; persists across reload via MMKV.
+- **1-on-1 thread at `chat/[id].tsx` — pixel-tuned + WhatsApp-style features:**
+  - Header: diagonal-gradient purple (`#4552E4 → #707CFD`), white back button, 52px avatar, lime call buttons. Subline live: `typing…` (animated dots) > `Online` (lime) > `last seen 5m ago` > nothing.
+  - Body: dark `#000` slab. Cream `#EDEDED` left bubbles, `#5360EC` right bubbles with sharp tail on streak-closing. Lime double-check on `read`.
+  - **Reply**: long-press a bubble → action sheet → Reply. Composer shows a dismissable reply banner; the sent message includes `replyToMessageId` and renders a quoted preview inside its bubble.
+  - **Delete**: long-press own bubble → Delete for everyone. 60-min edit window enforced by the server. Tombstone renders as italic "This message was deleted" with a slash icon.
+  - **Copy**: long-press a text bubble → Copy → clipboard via `expo-clipboard`.
+  - **Voice notes** render with play disc + waveform + duration (playback impl + recording UI ship in the next slice).
+  - Composer: dark slab, paperclip + grey input pill + contextual scan/mic vs lime send button. Reply preview banner appears above the input when replying.
+  - Day divider pill, reverse pagination on scroll-up, optimistic send with `sending` → `delivered`/`failed` ticks.
+- Mock OTP code: `1234`.
+
+**Backend (`../apps/api/`)** — production-grade NestJS:
+- `/auth/otp/request` — MSG91, argon2 OTP in Redis, rate-limited.
+- `/auth/otp/verify` — **production-wired.** argon2-verify against Redis, attempts-counter with lockout, audit row, JWT pair on success.
+- `/auth/refresh` — RS256 + family rotation + replay detection.
+- `/auth/signout` — revokes family.
+- `/me` GET + PATCH — JWT-guarded.
+- `/health`, `/ready` — Fly checks.
+- Chats + Messages REST: `GET /chats`, `POST /chats/one-on-one`, `GET /chats/:chatId`, `GET /chats/:chatId/messages?direction=desc&cursor=…&limit=…`, `POST /chats/:chatId/messages` (idempotent on `clientMessageId`, per-chat sequence allocated under `pg_advisory_xact_lock`), `PATCH /chats/:id/read|favourite|archive`, `PATCH /chats/read-all`.
+- **Socket.IO chat gateway** at `/chat` namespace — JWT in handshake, Upstash Redis adapter. Events:
+  - `message:send` (C→S, returns durable MessageDto in ack)
+  - `message:new` / `message:deleted` (S→C broadcasts — REST sends and deletes emit through the same channel)
+  - `session:resume` (catch-up since `lastSeenSequence`)
+  - `chat:read` (peer's read cursor advanced)
+  - `typing:ping` (C→S, 5s Redis TTL) / `typing:update` (S→C broadcast)
+  - `presence:request` (C→S, returns snapshot + subscribes) / `presence:update` (S→C edge transition)
+- **`DELETE /chats/:id/messages/:msgId?scope=everyone`** — soft-delete; sender-only, 60-min edit window; server zeroes content + broadcasts `message:deleted`.
+
+**Shared (`../packages/shared/`)** — zod schemas (auth + user), branded types (`Masked<T>`, `E164Phone`), phone helpers. Eventually the mobile app imports from here too (currently it has its own copies).
+
+**Not yet built** — Super Groups, image + voice attachments end-to-end (needs object storage), push notifications (needs Expo Push project + APNs/FCM creds), BullMQ workers for push fan-out, message reactions / forward / search, payments. All slot in behind existing interfaces.

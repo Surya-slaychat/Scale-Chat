@@ -11,7 +11,8 @@ import type {
 } from './types';
 
 const MOCK_LATENCY_MS = 800;
-const MOCK_OTP_CODE = '123456';
+/** Test OTP code accepted in mock mode. Matches `OTP_DIGITS` in auth-schemas. */
+const MOCK_OTP_CODE = '1234';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

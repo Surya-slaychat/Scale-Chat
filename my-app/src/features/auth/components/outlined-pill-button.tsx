@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { Pressable, StyleSheet, useColorScheme, type StyleProp, type ViewStyle } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Brand, Spacing } from '@/constants/theme';
+import { Brand, FontWeight, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 type Props = {
@@ -12,6 +12,7 @@ type Props = {
   style?: StyleProp<ViewStyle>;
 };
 
+/** Outlined sibling of `PillButton` — used for the "Edit" / "Get Code on call" CTAs. */
 export function OutlinedPillButton({ label, onPress, disabled, style }: Props) {
   const scheme = useColorScheme();
   const theme = useTheme();
@@ -39,18 +40,19 @@ export function OutlinedPillButton({ label, onPress, disabled, style }: Props) {
 
 const styles = StyleSheet.create({
   base: {
-    height: 56,
-    borderRadius: 28,
+    height: 53,
+    borderRadius: Radius.pill,
     borderWidth: 1.5,
     paddingHorizontal: Spacing.five,
     alignItems: 'center',
     justifyContent: 'center',
   },
   label: {
-    fontSize: 17,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: -0.2,
   },
   disabled: {
-    opacity: 0.55,
+    opacity: 0.5,
   },
 });

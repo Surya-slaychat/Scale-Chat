@@ -1,19 +1,20 @@
 /**
  * All user-facing strings for the auth/onboarding flow.
- * Centralised here so a future i18n layer can wrap them without touching screens.
+ * Centralised so a future i18n layer can wrap them without touching screens.
  */
 export const AuthCopy = {
   brand: 'ScaleChat',
 
   welcome: {
     headline: 'Welcome to',
-    subheading: "Let's Setup your account",
+    subheading: 'Let’s Setup your account',
     encryptionBadge: 'End to End Encrypted',
     cta: 'Get Started',
   },
 
   terms: {
-    line1: (brand: string) => `By signing up, you agree to ${brand}'s Privacy Policy and Terms of Service.`,
+    line1Lead: `By signing up, you agree to ScaleChat’s`,
+    and: 'and',
     line2: (brand: string) =>
       `We use your information to create your account, deliver our services, and help keep ${brand} safe and secure. In settings, you can access, manage, and delete your account information.`,
     privacyLabel: 'Privacy Policy',
@@ -24,7 +25,7 @@ export const AuthCopy = {
   },
 
   phone: {
-    title: 'Enter your Phone Number',
+    title: 'Enter your\nPhone Number',
     subtitle: (brand: string) => `${brand} will need to verify your phone number.`,
     countryLabel: 'India',
     inputPlaceholder: 'Enter Your Number',
@@ -34,13 +35,17 @@ export const AuthCopy = {
     confirmQuestion: 'Is this OK, or would you like to edit the number?',
     confirmEdit: 'Edit',
     confirmGetCode: 'Get Code',
+    invalidModal: {
+      title: 'Oh no!',
+      heading: 'Invalid Phone number',
+      body: 'Check your phone number or change the phone number',
+      cta: 'Try Again',
+    },
   },
 
   otp: {
-    title: 'Verify Phone Number',
-    subtitle: (phone: string) =>
-      `We have sent a verification code on your phone number ${phone}.\nCheck your Messages.`,
-    didNotReceive: "Didn't Received yet?",
+    title: 'Verify\nPhone Number',
+    didNotReceive: 'Didn’t Received yet?',
     resend: 'Resend Code',
     resending: 'Sending…',
     resendInSeconds: (s: number) => `Resend in ${s}s`,
@@ -56,7 +61,7 @@ export const AuthCopy = {
   },
 
   profile: {
-    title: 'Setup Your Profile',
+    title: 'Setup\nYour Profile',
     addPhotoLabel: 'Add Profile Picture',
     fullName: 'Full Name',
     mobile: 'Mobile Number',

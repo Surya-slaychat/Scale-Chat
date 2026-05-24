@@ -1,69 +1,151 @@
-import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, StyleSheet, View } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Brand, Spacing } from '@/constants/theme';
-import { PillButton } from '@/features/auth/components/pill-button';
+import { FontWeight } from '@/constants/theme';
 import { WelcomeCard } from '@/features/auth/components/welcome-card';
 import { AuthCopy } from '@/features/auth/copy';
-import { useTheme } from '@/hooks/use-theme';
 
+/**
+ * Account Setup page 1 — Figma 1:1554.
+ *
+ * Layout is absolute against the Figma 392 × 852 design canvas. Phones in the
+ * iPhone 14 / Pixel 7 class are 390-414px wide, so the screen reads as
+ * pixel-perfect. The dark `#0B1014` frame sits behind a 359-wide purple
+ * gradient card; a lime CTA pins to the bottom with the encryption hint above
+ * it. Strings live in `AuthCopy` so a future i18n pass is a single-file change.
+ */
 export default function WelcomeScreen() {
   const router = useRouter();
-  const theme = useTheme();
 
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.cardWrap}>
-          <WelcomeCard />
-        </View>
+    <View style={styles.root}>
+      {/* Hero card — fills the area between top 64px and bottom 250px */}
+      <View style={styles.cardSlot}>
+        <WelcomeCard />
+      </View>
 
-        <ThemedText style={[styles.subhead, { color: Brand.primary }]}>
-          {AuthCopy.welcome.subheading}
+      {/* "Let's Setup your account" — Figma left 117 (centered), top 623 */}
+      <ThemedText style={styles.subhead}>{AuthCopy.welcome.subheading}</ThemedText>
+
+      {/* "End to End Encrypted" with the lime shield-check — Figma top 729 */}
+      <View style={styles.encryptionRow}>
+        <EncryptionGlyph />
+        <ThemedText style={styles.encryptionText}>
+          {AuthCopy.welcome.encryptionBadge}
         </ThemedText>
+      </View>
 
-        <View style={styles.encryptionRow}>
-          <Feather name="lock" size={14} color={Brand.accent} />
-          <ThemedText style={[styles.encryptionText, { color: theme.textSecondary }]}>
-            {AuthCopy.welcome.encryptionBadge}
-          </ThemedText>
-        </View>
+      {/* Get Started CTA — Figma left 17, right 16, bottom 41, height 53 */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={AuthCopy.welcome.cta}
+        onPress={() => router.push('/terms')}
+        style={({ pressed }: { pressed: boolean }) => [
+          styles.cta,
+          pressed && { opacity: 0.85 },
+        ]}>
+        <ThemedText style={styles.ctaLabel}>{AuthCopy.welcome.cta}</ThemedText>
+      </Pressable>
 
-        <PillButton label={AuthCopy.welcome.cta} onPress={() => router.push('/terms')} />
-      </SafeAreaView>
-    </ThemedView>
+      {/* Home indicator bar — Figma Rectangle 17, top 841 */}
+      <View style={styles.homeIndicator} />
+    </View>
+  );
+}
+
+/** Lime shield-check next to the encryption badge. The Figma asset is the
+ *  outlined glyph with a 1.375px stroke in `#E2FA61`. */
+function EncryptionGlyph() {
+  return (
+    <Svg width={11} height={12.38} viewBox="0 0 11 12.38" fill="none">
+      <Path
+        d="M5.5 0.7 L10.2 2.4 V5.9 C10.2 8.7 8.2 11.0 5.5 11.7 C2.8 11.0 0.8 8.7 0.8 5.9 V2.4 L5.5 0.7 Z"
+        stroke="#E2FA61"
+        strokeWidth={1.375}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M3.6 6.0 L5.0 7.4 L7.6 4.8"
+        stroke="#E2FA61"
+        strokeWidth={1.375}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  safe: {
+  root: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    paddingBottom: Spacing.three,
-    gap: Spacing.three,
+    backgroundColor: '#0B1014',
+    position: 'relative',
   },
-  cardWrap: {
-    flex: 1,
-    marginTop: Spacing.three,
+  cardSlot: {
+    position: 'absolute',
+    left: 17,
+    right: 16,
+    top: 64,
+    bottom: 250,
   },
   subhead: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 623,
     textAlign: 'center',
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 13.33,
+    lineHeight: 13.5, // 101% of 13.33
+    fontWeight: FontWeight.regular,
+    letterSpacing: -0.4, // -0.03em on 13.33
+    color: '#A9B0FF',
   },
   encryptionRow: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 729,
     flexDirection: 'row',
-    gap: Spacing.one,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  encryptionText: {
+    fontSize: 13.33,
+    lineHeight: 13.5,
+    fontWeight: FontWeight.regular,
+    letterSpacing: -0.4,
+    color: '#D6D6DA',
+  },
+  cta: {
+    position: 'absolute',
+    left: 17,
+    right: 16,
+    bottom: 41,
+    height: 53,
+    backgroundColor: '#E2FA61',
+    borderRadius: 26.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  encryptionText: {
-    fontSize: 13,
-    fontWeight: '500',
+  ctaLabel: {
+    fontSize: 19.73,
+    lineHeight: 30,
+    fontWeight: FontWeight.medium,
+    letterSpacing: -0.2, // -0.01em on 19.73
+    color: '#1B1B1B',
+    textAlign: 'center',
+  },
+  homeIndicator: {
+    position: 'absolute',
+    left: '50%',
+    marginLeft: -71,
+    bottom: 11, // 852 - 841 = 11px from bottom
+    width: 142,
+    height: 6,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 3,
   },
 });

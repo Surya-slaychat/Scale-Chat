@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { ActivityIndicator, Pressable, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Brand, Spacing } from '@/constants/theme';
+import { Brand, FontWeight, Radius, Spacing } from '@/constants/theme';
 
 type Props = {
   label: string;
@@ -12,6 +12,10 @@ type Props = {
   style?: StyleProp<ViewStyle>;
 };
 
+/**
+ * The lime "Get Started / Next / Done" CTA — pixel-spec from Figma:
+ * height 53, radius 26.5, fill #E2FA61, label Poppins-Medium 19.7.
+ */
 export function PillButton({ label, onPress, loading, disabled, style }: Props) {
   const isInactive = loading || disabled;
   return (
@@ -40,17 +44,18 @@ export function PillButton({ label, onPress, loading, disabled, style }: Props) 
 
 const styles = StyleSheet.create({
   base: {
-    height: 56,
-    borderRadius: 28,
+    height: 53,
+    borderRadius: Radius.pill,
     paddingHorizontal: Spacing.five,
     alignItems: 'center',
     justifyContent: 'center',
   },
   label: {
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: -0.2,
   },
   disabled: {
-    opacity: 0.55,
+    opacity: 0.5,
   },
 });

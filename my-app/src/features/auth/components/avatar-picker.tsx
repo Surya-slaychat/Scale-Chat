@@ -5,7 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Brand, Spacing } from '@/constants/theme';
+import { Brand, FontWeight, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 type Props = {
@@ -13,6 +13,8 @@ type Props = {
   onPicked: (uri: string) => void;
   label?: string;
 };
+
+const AVATAR_SIZE = 92;
 
 export function AvatarPicker({ uri, onPicked, label }: Props) {
   const theme = useTheme();
@@ -43,21 +45,21 @@ export function AvatarPicker({ uri, onPicked, label }: Props) {
     <View style={styles.wrap}>
       <Pressable
         onPress={pick}
-        style={[styles.circle, { backgroundColor: theme.surfaceMuted }]}
+        style={[styles.circle, { backgroundColor: theme.surfaceInput }]}
         accessibilityRole="button"
         accessibilityLabel={label ?? 'Add profile picture'}>
         {uri ? (
           <Image source={{ uri }} style={styles.image} contentFit="cover" />
         ) : (
-          <Feather name="user" size={48} color={theme.inputPlaceholder} />
+          <Feather name="user" size={44} color={theme.inputPlaceholder} />
         )}
       </Pressable>
       {label ? (
-        <ThemedText style={[styles.label, { color: theme.textSecondary }]}>{label}</ThemedText>
+        <ThemedText style={[styles.label, { color: theme.text }]}>{label}</ThemedText>
       ) : null}
       {uri ? (
         <View style={[styles.editBadge, { backgroundColor: Brand.primary }]} pointerEvents="none">
-          <Feather name="edit-2" size={12} color="#FFFFFF" />
+          <Feather name="edit-2" size={11} color="#FFFFFF" />
         </View>
       ) : null}
     </View>
@@ -71,28 +73,29 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   circle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   image: {
-    width: 96,
-    height: 96,
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
   },
   label: {
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: -0.2,
   },
   editBadge: {
     position: 'absolute',
-    right: '32%',
+    right: '34%',
     top: 0,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
   },

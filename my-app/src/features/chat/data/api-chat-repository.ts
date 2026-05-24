@@ -1,0 +1,507 @@
+import type {
+  ChatDetailDto,
+  ChatListResponse,
+  MessageDto,
+  MessageListResponse,
+  SendMessageBody,
+} from '@scalechat/shared';
+
+import { apiClient, ApiError } from '@/lib/api-client';
+import { chatSocket } from '@/lib/chat-socket';
+
+import type { Contact, Message, MessageStatus, SendMessageInput, Thread } from '../types';
+import type { ChatRepository, LoadOlderResult } from './chat-repository';
+import { mockChatRepository } from './mock-chat-repository';
+
+// ─── Listener bus ─────────────────────────────────────────────────────────────
+
+const listeners = new Set<() => void>();
+function notify(): void {
+  listeners.forEach((l) => l());
+}
+
+// ─── In-memory message cache ─────────────────────────────────────────────────
+//
+// The cache is the source of truth that screens read from. REST fetches seed it;
+// socket `message:new` events keep it live; optimistic sends insert directly.
+// The cache never grows unbounded — we only hold messages the user has actually
+// pulled in via listMessages / loadOlder.
+
+type ThreadCache = {
+  messages: Message[];                // chronological asc
+  oldestCursor: string | null;        // cursor for loadOlder; null once exhausted
+  hasMoreOlder: boolean;
+};
+
+const cacheByChatId = new Map<string, ThreadCache>();
+const counterpartByChatId = new Map<string, string>();
+const highestSeqByChatId = new Map<string, bigint>();
+
+function getCache(chatId: string): ThreadCache {
+  let c = cacheByChatId.get(chatId);
+  if (!c) {
+    c = { messages: [], oldestCursor: null, hasMoreOlder: true };
+    cacheByChatId.set(chatId, c);
+  }
+  return c;
+}
+
+function rememberSequence(chatId: string, raw: string | number | bigint): void {
+  const next = typeof raw === 'bigint' ? raw : BigInt(raw);
+  const prev = highestSeqByChatId.get(chatId);
+  if (prev === undefined || next > prev) highestSeqByChatId.set(chatId, next);
+}
+
+/** Insert a message into the cache idempotently. Dedups by durable `id`, then
+ *  by `clientMessageId` (matches the optimistic insert whose id was the
+ *  clientMessageId). Returns true if changed. */
+function upsertMessage(chatId: string, m: Message): boolean {
+  const c = getCache(chatId);
+  const byId = c.messages.findIndex((x) => x.id === m.id);
+  if (byId >= 0) {
+    c.messages[byId] = m;
+    return true;
+  }
+  if (m.clientMessageId) {
+    const byClient = c.messages.findIndex(
+      (x) => x.clientMessageId === m.clientMessageId || x.id === m.clientMessageId
+    );
+    if (byClient >= 0) {
+      c.messages[byClient] = m;
+      return true;
+    }
+  }
+  const at = c.messages.findIndex((x) => x.sequence > m.sequence);
+  if (at < 0) c.messages.push(m);
+  else c.messages.splice(at, 0, m);
+  return true;
+}
+
+/** Replace a pending message (matched by `pendingId`) with the durable one
+ *  returned by the server. Used by the optimistic send path. */
+function reconcileSend(chatId: string, pendingId: string, durable: Message): void {
+  const c = getCache(chatId);
+  const at = c.messages.findIndex((x) => x.id === pendingId);
+  if (at >= 0) {
+    c.messages[at] = durable;
+  } else {
+    upsertMessage(chatId, durable);
+  }
+}
+
+function markPendingFailed(chatId: string, pendingId: string): void {
+  const c = getCache(chatId);
+  const at = c.messages.findIndex((x) => x.id === pendingId);
+  if (at >= 0) {
+    const prev = c.messages[at]!;
+    c.messages[at] = { ...prev, status: 'failed' };
+  }
+}
+
+// ─── DTO ↔ domain conversion ──────────────────────────────────────────────────
+
+function dtoToMessage(m: MessageDto, counterpartId: string): Message {
+  const base = {
+    id: m.id,
+    threadId: m.chatId,
+    senderId: m.senderUserId === counterpartId ? counterpartId : 'me',
+    sequence: Number(m.sequence),
+    createdAt: m.createdAt,
+    status: 'delivered' as MessageStatus,
+    clientMessageId: m.clientMessageId,
+    replyToMessageId: m.replyToMessageId,
+    deletedAt: m.deletedAt,
+  };
+  if (m.kind === 'VOICE') {
+    return { ...base, type: 'voice', durationSec: m.durationSec ?? 0, waveform: m.waveform ?? [] };
+  }
+  return { ...base, type: 'text', text: m.text ?? '' };
+}
+
+function previewToMessage(item: ChatListResponse['items'][number]): Message {
+  const last = item.lastMessage;
+  const senderId =
+    last && item.counterpart && last.senderUserId === item.counterpart.id ? item.counterpart.id : 'me';
+  const base = {
+    id: last?.id ?? `${item.id}-empty`,
+    threadId: item.id,
+    senderId,
+    sequence: last ? Number(last.sequence) : 0,
+    createdAt: last?.createdAt ?? new Date().toISOString(),
+    status: 'delivered' as MessageStatus,
+  };
+  if (!last) return { ...base, type: 'text', text: '' };
+  if (last.kind === 'VOICE') return { ...base, type: 'voice', durationSec: 0, waveform: [] };
+  return { ...base, type: 'text', text: last.preview };
+}
+
+function itemToThread(item: ChatListResponse['items'][number]): Thread {
+  const counterpart: Contact = item.counterpart
+    ? {
+        id: item.counterpart.id,
+        displayName: item.counterpart.displayName,
+        avatarUri: item.counterpart.avatarUri ?? undefined,
+      }
+    : { id: item.id, displayName: item.title, avatarUri: item.avatarUri ?? undefined };
+
+  const last = previewToMessage(item);
+  const threadKind =
+    item.kind === 'ONE_ON_ONE' ? 'direct' : item.kind === 'GROUP' ? 'group' : 'super';
+
+  return {
+    id: item.id,
+    kind: threadKind,
+    counterpart,
+    lastMessage: last,
+    unreadCount: item.unreadCount,
+    lastReadSequence: item.lastMessage ? Number(item.lastMessage.sequence) - item.unreadCount : 0,
+    isPinned: item.isPinned,
+    isArchived: item.isArchived,
+    isFavourite: item.isFavourite,
+  };
+}
+
+function detailToThread(detail: ChatDetailDto, last?: MessageDto): Thread {
+  const counterpart: Contact = detail.counterpart
+    ? {
+        id: detail.counterpart.id,
+        displayName: detail.counterpart.displayName,
+        phoneE164: detail.counterpart.phoneE164 ?? undefined,
+        avatarUri: detail.counterpart.avatarUri ?? undefined,
+      }
+    : { id: detail.id, displayName: detail.title, avatarUri: detail.avatarUri ?? undefined };
+
+  const kind = detail.kind === 'ONE_ON_ONE' ? 'direct' : detail.kind === 'GROUP' ? 'group' : 'super';
+  const fallbackMessage: Message = {
+    id: `${detail.id}-empty`,
+    threadId: detail.id,
+    senderId: counterpart.id,
+    sequence: 0,
+    createdAt: new Date().toISOString(),
+    status: 'delivered',
+    type: 'text',
+    text: '',
+  };
+
+  return {
+    id: detail.id,
+    kind,
+    counterpart,
+    lastMessage: last ? dtoToMessage(last, counterpart.id) : fallbackMessage,
+    unreadCount: 0,
+    lastReadSequence: Number(detail.lastReadSequence),
+  };
+}
+
+async function fetchDetail(chatId: string): Promise<ChatDetailDto> {
+  const detail = await apiClient.get<ChatDetailDto>(`/chats/${chatId}`);
+  if (detail.counterpart) counterpartByChatId.set(chatId, detail.counterpart.id);
+  return detail;
+}
+
+// ─── Socket event wiring (one-time) ───────────────────────────────────────────
+
+let socketWired = false;
+function ensureSocketWired(): void {
+  if (socketWired) return;
+  socketWired = true;
+  // Opening the connection is fire-and-forget; if the user isn't authed yet,
+  // ensureConnected is a no-op until they sign in.
+  void chatSocket.ensureConnected();
+
+  chatSocket.onMessage((m: MessageDto) => {
+    const counterpartId = counterpartByChatId.get(m.chatId) ?? '';
+    const domain = dtoToMessage(m, counterpartId);
+    upsertMessage(m.chatId, domain);
+    rememberSequence(m.chatId, m.sequence);
+    notify();
+  });
+
+  // When a peer (or our own other device) deletes a message, the server
+  // broadcasts `message:deleted`. Mark the cached row as a tombstone so the
+  // bubble re-renders as "This message was deleted".
+  chatSocket.onMessageDeleted((d) => {
+    const cache = cacheByChatId.get(d.chatId);
+    if (!cache) return;
+    const at = cache.messages.findIndex((x) => x.id === d.messageId);
+    if (at < 0) return;
+    const prev = cache.messages[at]!;
+    cache.messages[at] = {
+      ...prev,
+      deletedAt: new Date().toISOString(),
+      // Zero the content so leftover text/voice can't be rendered.
+      ...(prev.type === 'text' ? { text: '' } : { durationSec: 0, waveform: [] }),
+    } as Message;
+    notify();
+  });
+
+  chatSocket.onConnectionChange((connected) => {
+    if (!connected) return;
+    // On reconnect, pull `session:resume` for every cached chat so we don't miss
+    // events that flowed while we were offline.
+    for (const [chatId, c] of cacheByChatId) {
+      const since = highestSeqByChatId.get(chatId);
+      void chatSocket
+        .resume({ chatId, lastSeenSequence: (since ?? 0n).toString() })
+        .then((reply) => {
+          if (!reply) return;
+          const counterpartId = counterpartByChatId.get(chatId) ?? '';
+          let changed = false;
+          for (const m of reply.items) {
+            const domain = dtoToMessage(m, counterpartId);
+            upsertMessage(chatId, domain);
+            rememberSequence(chatId, m.sequence);
+            changed = true;
+          }
+          if (changed) notify();
+        });
+      void c;
+    }
+  });
+}
+
+// ─── Public repository ───────────────────────────────────────────────────────
+
+const INITIAL_PAGE_LIMIT = 50;
+const OLDER_PAGE_LIMIT = 50;
+
+/**
+ * Real-API implementation of `ChatRepository`. Backed by:
+ *   - REST for list / detail / send fallback / read-cursor mutations
+ *   - Socket.IO gateway for real-time `message:new` and read receipts
+ *   - In-memory cache (`cacheByChatId`) that screens read through `subscribe()`
+ *
+ * Optimistic send: `sendMessage` inserts a `status: 'sending'` row into the
+ * cache and notifies immediately. The socket path emits and awaits the ack;
+ * on success we reconcile by id (the message's durable id == clientMessageId
+ * because the backend uses `clientMessageId` as the primary lookup). On
+ * socket failure we fall back to REST so a half-broken socket doesn't block
+ * sends. Failure flips the row to `status: 'failed'` for retry.
+ */
+export const apiChatRepository: ChatRepository = {
+  async listThreads() {
+    ensureSocketWired();
+    const res = await apiClient.get<ChatListResponse>('/chats');
+    res.items.forEach((it) => {
+      if (it.counterpart) counterpartByChatId.set(it.id, it.counterpart.id);
+    });
+    return res.items.map(itemToThread);
+  },
+
+  async getThread(threadId) {
+    ensureSocketWired();
+    try {
+      const [detail, messages] = await Promise.all([
+        fetchDetail(threadId),
+        apiClient.get<MessageListResponse>(
+          `/chats/${threadId}/messages?direction=desc&limit=1`
+        ),
+      ]);
+      const last = messages.items[messages.items.length - 1];
+      return detailToThread(detail, last);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  },
+
+  async listMessages(threadId) {
+    ensureSocketWired();
+    if (!counterpartByChatId.has(threadId)) {
+      try {
+        await fetchDetail(threadId);
+      } catch {
+        // ignored — sender attribution will default to other-side
+      }
+    }
+    const res = await apiClient.get<MessageListResponse>(
+      `/chats/${threadId}/messages?direction=desc&limit=${INITIAL_PAGE_LIMIT}`
+    );
+    const counterpartId = counterpartByChatId.get(threadId) ?? '';
+
+    // Seed cache: the response is already chronological asc (server contract).
+    const cache = getCache(threadId);
+    cache.messages = res.items.map((m) => dtoToMessage(m, counterpartId));
+    cache.oldestCursor = res.meta.nextCursor;
+    cache.hasMoreOlder = res.meta.hasMore;
+    res.items.forEach((m) => rememberSequence(threadId, m.sequence));
+
+    return [...cache.messages];
+  },
+
+  async loadOlder(threadId): Promise<LoadOlderResult> {
+    const cache = getCache(threadId);
+    if (!cache.hasMoreOlder || !cache.oldestCursor) {
+      return { items: [], hasMore: false };
+    }
+    const res = await apiClient.get<MessageListResponse>(
+      `/chats/${threadId}/messages?direction=desc&limit=${OLDER_PAGE_LIMIT}&cursor=${encodeURIComponent(cache.oldestCursor)}`
+    );
+    const counterpartId = counterpartByChatId.get(threadId) ?? '';
+    const older = res.items.map((m) => dtoToMessage(m, counterpartId));
+
+    // Prepend to cache, skipping anything already present (defensive).
+    const seen = new Set(cache.messages.map((m) => m.id));
+    const fresh = older.filter((m) => !seen.has(m.id));
+    cache.messages = [...fresh, ...cache.messages];
+    cache.oldestCursor = res.meta.nextCursor;
+    cache.hasMoreOlder = res.meta.hasMore;
+    notify();
+    return { items: fresh, hasMore: res.meta.hasMore };
+  },
+
+  async sendMessage(input: SendMessageInput) {
+    ensureSocketWired();
+
+    // 1. Optimistic insert with status:'sending'. The id IS the clientMessageId
+    //    so reconciliation by id Just Works when the server returns the durable
+    //    row (the messages.service path also stores clientMessageId).
+    const optimisticBase = {
+      id: input.clientMessageId,
+      threadId: input.threadId,
+      senderId: 'me' as const,
+      sequence: Number.MAX_SAFE_INTEGER, // sorts to the bottom until reconciled
+      createdAt: new Date().toISOString(),
+      status: 'sending' as MessageStatus,
+      clientMessageId: input.clientMessageId,
+      replyToMessageId: input.replyToMessageId ?? null,
+      deletedAt: null,
+    };
+    const optimistic: Message =
+      input.type === 'text'
+        ? { ...optimisticBase, type: 'text', text: input.text }
+        : { ...optimisticBase, type: 'voice', durationSec: input.durationSec, waveform: input.waveform };
+    upsertMessage(input.threadId, optimistic);
+    notify();
+
+    const body: SendMessageBody =
+      input.type === 'text'
+        ? {
+            clientMessageId: input.clientMessageId,
+            kind: 'TEXT',
+            text: input.text,
+            replyToMessageId: input.replyToMessageId,
+          }
+        : {
+            clientMessageId: input.clientMessageId,
+            kind: 'VOICE',
+            durationSec: input.durationSec,
+            waveform: input.waveform,
+            replyToMessageId: input.replyToMessageId,
+          };
+
+    // 2. Prefer the socket path (real-time + same advisory-locked sequence on the
+    //    server). Fall back to REST so a degraded socket never blocks sends.
+    let durable: MessageDto | null = null;
+    if (chatSocket.isConnected()) {
+      try {
+        const ack = await chatSocket.send({ chatId: input.threadId, body });
+        if (ack.ok) {
+          durable = ack.message;
+        } else if (ack.code !== 'server_error') {
+          // Validation / membership errors are not retryable — surface as failed.
+          markPendingFailed(input.threadId, input.clientMessageId);
+          notify();
+          throw new Error(`send failed: ${ack.code}`);
+        }
+      } catch {
+        // fall through to REST
+      }
+    }
+    if (!durable) {
+      try {
+        durable = await apiClient.post<MessageDto>(`/chats/${input.threadId}/messages`, body);
+      } catch (err) {
+        markPendingFailed(input.threadId, input.clientMessageId);
+        notify();
+        throw err;
+      }
+    }
+
+    // 3. Reconcile cache with the durable row.
+    const counterpartId = counterpartByChatId.get(input.threadId) ?? '';
+    const domain = dtoToMessage(durable, counterpartId);
+    reconcileSend(input.threadId, input.clientMessageId, domain);
+    rememberSequence(input.threadId, durable.sequence);
+    notify();
+    return domain;
+  },
+
+  async deleteMessage(threadId, messageId) {
+    // Optimistic tombstone: flip the cached row first so the UI updates instantly.
+    const cache = cacheByChatId.get(threadId);
+    if (cache) {
+      const at = cache.messages.findIndex((x) => x.id === messageId);
+      if (at >= 0) {
+        const prev = cache.messages[at]!;
+        cache.messages[at] = {
+          ...prev,
+          deletedAt: new Date().toISOString(),
+          ...(prev.type === 'text' ? { text: '' } : { durationSec: 0, waveform: [] }),
+        } as Message;
+        notify();
+      }
+    }
+    try {
+      await apiClient.del(`/chats/${threadId}/messages/${messageId}?scope=everyone`);
+    } catch (err) {
+      // Roll back the tombstone on failure so the user can retry.
+      if (cache) {
+        const at = cache.messages.findIndex((x) => x.id === messageId);
+        if (at >= 0) {
+          const prev = cache.messages[at]!;
+          cache.messages[at] = { ...prev, deletedAt: null } as Message;
+          notify();
+        }
+      }
+      throw err;
+    }
+  },
+
+  async markThreadRead(threadId) {
+    let upto = highestSeqByChatId.get(threadId);
+    if (upto === undefined) {
+      // Cache not warm — pull the latest page to learn the highest sequence.
+      const res = await apiClient.get<MessageListResponse>(
+        `/chats/${threadId}/messages?direction=desc&limit=1`
+      );
+      res.items.forEach((m) => rememberSequence(threadId, m.sequence));
+      upto = highestSeqByChatId.get(threadId);
+    }
+    if (upto === undefined) return;
+    try {
+      await apiClient.patch(`/chats/${threadId}/read`, { uptoSequence: upto.toString() });
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      if (err.status !== 404) throw err;
+    }
+    notify();
+  },
+
+  async markAllRead() {
+    try {
+      await apiClient.patch<void>('/chats/read-all');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) throw err;
+    }
+    notify();
+  },
+
+  async toggleFavourite(threadId) {
+    try {
+      await apiClient.patch<{ isFavourite: boolean }>(`/chats/${threadId}/favourite`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) throw err;
+    }
+    notify();
+  },
+
+  subscribe(listener) {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  },
+};
+
+export { mockChatRepository };

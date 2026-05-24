@@ -2,12 +2,16 @@ import { useMMKVString } from 'react-native-mmkv';
 
 import { StorageKeys, storage } from '@/lib/mmkv';
 
-import { mockAuthRepository } from '../data/mock-auth-repository';
+import { authRepository } from '../data';
 import type { CurrentUser, ProfileUpdate } from '../data/types';
 
 /**
  * Reactive auth state — re-renders consumers when the persisted user changes.
  * Uses react-native-mmkv's `useMMKVString` hook so MMKV writes propagate.
+ *
+ * The seam underneath (`authRepository`) flips between mock and real-API impls
+ * via `EXPO_PUBLIC_USE_MOCKS`. Both write `auth.currentUser` to MMKV so this
+ * hook's contract is identical regardless of which impl is active.
  */
 export function useAuth() {
   const [currentUserRaw] = useMMKVString(StorageKeys.authCurrentUser, storage);
@@ -17,8 +21,8 @@ export function useAuth() {
     currentUser,
     isAuthenticated: currentUser !== null && currentUser.fullName.length > 0,
     hasVerifiedPhone: currentUser !== null, // verified but maybe missing profile
-    signOut: () => mockAuthRepository.signOut(),
-    updateProfile: (patch: ProfileUpdate) => mockAuthRepository.updateProfile(patch),
+    signOut: () => authRepository.signOut(),
+    updateProfile: (patch: ProfileUpdate) => authRepository.updateProfile(patch),
   };
 }
 
