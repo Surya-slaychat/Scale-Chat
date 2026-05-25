@@ -135,7 +135,7 @@ These items are an executable checklist — when the gating tranche begins, the 
 |---|---|---|---|---|---|---|
 | **2.0** | Dev pipeline documentation | `instruction-to-run-the-app.md` + `my-app/CLAUDE.md` §7.5 + 3 helper npm scripts + Knowledge base K1–K10. **Docs-only; zero native deps installed.** ✅ LANDED 2026-05-25 (`e70ce46`). | n/a | ✅ | — | — |
 | **2.A** | Reactions mobile UI | ✅ **LANDED 2026-05-25** (`c23365f` + mock follow-up). reactions strip + pill row + `rn-emoji-keyboard` picker + socket `reaction:updated` sync + optimistic add/remove (api + mock repos). QA-passed on Android emulator: strip renders, picker opens + themed, emoji-select → pill renders. | none | ✅ | — | 2.0 |
-| **2.B** | Schema foundation | `MessageKind` enum + media fields + extended validators | ✅ | none | A | 2.0 |
+| **2.B** | Schema foundation | ✅ **LANDED 2026-05-25**. `MessageKind` +7 values, 16 nullable `Message` columns (Migration A), `MediaService` DOCUMENT/VIDEO, discriminated-union send validators, `SERVER_ONLY_KINDS` guard. 26/26 e2e green. | ✅ | none | A | 2.0 |
 | **2.E** | Forward + Pin + Message Info | 3 new modules + 3 new UI rows + ForwardPicker + MessageInfo screens + PinnedStrip | ✅ | ✅ | — | 2.B |
 | **2.H** | Calls signalling (server) | `CallSession` table + 100ms-or-LiveKit-Cloud client + ring/accept/decline/hangup REST + webhook + **`user:{userId}` socket room** + **BullMQ ring-timeout** | ✅ | none | C | 2.B + POC complete |
 | **2.I** | Call UI + push wakeup + **EAS migration** | `UserDevice` table + push module + CallScreen + IncomingCallScreen + provider SDK install + **first tranche to require EAS Build** (push wakeup + calls can't be tested on emulator alone) | ✅ | ✅ | D | 2.H + EAS + Apple Dev account |
@@ -204,11 +204,12 @@ Backend-only foundation. No mobile UI changes. Unlocks 2.C–2.G.
 
 | Sub-item | Frontend | Backend | Notes |
 |---|---|---|---|
-| **B.1** Migration A — `MessageKind` enum expansion + media columns | n/a | 🚫 | Adds 9 enum values + ~15 nullable columns |
-| **B.2** `MediaService` extended to DOCUMENT + VIDEO | n/a | 🚫 | Extends `EXT_BY_CONTENT_TYPE` + `VALID_EXTS_BY_KIND` + size caps |
-| **B.3** `SendMessageSchema` discriminated-union per-kind validators | n/a | 🚫 | Adds DOCUMENT, VIDEO, LOCATION, CONTACT_CARD, POLL cases via `superRefine` |
-| **B.4** `messagesService.send` persists per-kind columns | n/a | 🚫 | Extend the kind-switch at `messages.service.ts:357-410` |
-| **B.5** `SERVER_ONLY_KINDS` guard | n/a | 🚫 | Reject client-supplied `POLL`, `CALL_EVENT`, `LOCATION_LIVE` from public send. (Trimmed per R7: `POLL_VOTE` and `SCHEDULED` removed alongside deferred slices.) |
+| **B.1** Migration A — `MessageKind` enum expansion + media columns | n/a | ✅ | `20260525211223_expand_message_kind_and_media_fields`: 7 enum values + 16 nullable columns + 2 indexes + 2 FKs. Applied to dev (`public`) + `test_e2e`. |
+| **B.2** `MediaService` extended to DOCUMENT + VIDEO | n/a | ✅ | `EXT_BY_CONTENT_TYPE` + `VALID_EXTS_BY_KIND` extended; size-cap if/else generalized to a per-kind `CONTENT_RULES` map (IMAGE 10MB / VOICE 5MB / DOCUMENT 100MB / VIDEO 80MB). |
+| **B.3** `SendMessageSchema` discriminated-union per-kind validators | n/a | ✅ | `superRefine` branches for DOCUMENT, VIDEO, LOCATION, CONTACT_CARD; `MediaUploadRequestSchema` per-kind `MEDIA_RULES`. |
+| **B.4** `messagesService.send` persists per-kind columns | n/a | ✅ | Kind-switch extended; `MEDIA_BACKED_KINDS` drives `validateObjectKey`; create-data writes all per-kind columns; `rowToDto` + `MessageDto` carry them. |
+| **B.5** `SERVER_ONLY_KINDS` guard | n/a | ✅ | `SERVER_ONLY_KINDS` Set (`SYSTEM/POLL/CALL_EVENT/LOCATION_LIVE`) rejected in both the shared zod schema AND `messages.service` (defence-in-depth) with `kind_not_allowed_from_client`. |
+| **B.6** e2e + test-harness fix | n/a | ✅ | 5 new e2e cases (DOCUMENT persist + no-mime 400, LOCATION ok + out-of-range 400, CONTACT_CARD ok + bad-E.164 400, server-only kinds 400). Fixed `jest-e2e.config.js` `maxWorkers: 1` — the 2-suite parallel run was deadlocking on the shared `test_e2e` TRUNCATE. 26/26 e2e green. |
 
 ### Migration A — `20260526000000_expand_message_kind_and_media_fields`
 

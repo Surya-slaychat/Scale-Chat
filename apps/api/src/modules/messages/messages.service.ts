@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { MessageKind, Prisma } from '@prisma/client';
+import { SERVER_ONLY_KINDS } from '@scalechat/shared';
 import type {
   ChatDetailDto,
   ChatMediaListQuery,
@@ -9,6 +10,14 @@ import type {
   MessageListResponse,
   SendMessageBody,
 } from '@scalechat/shared';
+
+/** Kinds whose `mediaObjectKey` must be validated against the sender's prefix. */
+const MEDIA_BACKED_KINDS: ReadonlySet<MessageKind> = new Set([
+  MessageKind.IMAGE,
+  MessageKind.VOICE,
+  MessageKind.DOCUMENT,
+  MessageKind.VIDEO,
+]);
 
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { buildPage, decodeCursor, encodeCursor } from '../../common/pagination/cursor';
@@ -36,6 +45,21 @@ type MessageRow = {
   imageHeight: number | null;
   durationSec: number | null;
   waveform: Prisma.JsonValue | null;
+  mediaMimeType: string | null;
+  videoDurationSec: number | null;
+  videoWidth: number | null;
+  videoHeight: number | null;
+  latitude: number | null;
+  longitude: number | null;
+  locationName: string | null;
+  contactName: string | null;
+  contactPhoneE164: string | null;
+  documentTitle: string | null;
+  documentSizeBytes: bigint | null;
+  forwardedFromMessageId: string | null;
+  forwardCount: number;
+  pinnedAt: Date | null;
+  pinnedByUserId: string | null;
   replyToMessageId: string | null;
   createdAt: Date;
   deletedAt: Date | null;
@@ -59,6 +83,21 @@ function buildRowToDto(media: MediaService) {
       imageHeight: m.imageHeight,
       durationSec: m.durationSec,
       waveform: Array.isArray(m.waveform) ? (m.waveform as number[]) : null,
+      mediaMimeType: m.mediaMimeType,
+      videoDurationSec: m.videoDurationSec,
+      videoWidth: m.videoWidth,
+      videoHeight: m.videoHeight,
+      latitude: m.latitude,
+      longitude: m.longitude,
+      locationName: m.locationName,
+      contactName: m.contactName,
+      contactPhoneE164: m.contactPhoneE164,
+      documentTitle: m.documentTitle,
+      documentSizeBytes: m.documentSizeBytes !== null ? Number(m.documentSizeBytes) : null,
+      forwardedFromMessageId: m.forwardedFromMessageId,
+      forwardCount: m.forwardCount,
+      pinnedAt: m.pinnedAt ? m.pinnedAt.toISOString() : null,
+      pinnedByUserId: m.pinnedByUserId,
       replyToMessageId: m.replyToMessageId,
       createdAt: m.createdAt.toISOString(),
       deletedAt: m.deletedAt ? m.deletedAt.toISOString() : null,
@@ -354,9 +393,20 @@ export class MessagesService {
       }
     }
 
-    // Validate the supplied object key belongs to this sender for IMAGE/VOICE
-    // before we touch the DB. Stops a client pasting an arbitrary key.
-    if (body.kind === 'IMAGE' || body.kind === 'VOICE') {
+    // Server-only kinds (SYSTEM/POLL/CALL_EVENT/LOCATION_LIVE) are authored
+    // server-side — reject them here too (zod superRefine already blocks them,
+    // this is defence-in-depth against a path that skips the pipe).
+    if (SERVER_ONLY_KINDS.has(body.kind)) {
+      throw new BadRequestException({
+        code: 'kind_not_allowed_from_client',
+        message: `${body.kind} messages are authored server-side.`,
+      });
+    }
+
+    // Validate the supplied object key belongs to this sender for media-backed
+    // kinds (IMAGE/VOICE/DOCUMENT/VIDEO) before we touch the DB. Stops a client
+    // pasting an arbitrary key.
+    if (MEDIA_BACKED_KINDS.has(body.kind)) {
       if (!body.mediaObjectKey) {
         // Zod's superRefine already catches this, but defend-in-depth.
         throw new BadRequestException({
@@ -399,12 +449,31 @@ export class MessagesService {
           sequence: next,
           kind: body.kind,
           text: body.kind === 'TEXT' ? body.text ?? null : null,
-          mediaObjectKey: body.kind === 'IMAGE' || body.kind === 'VOICE' ? body.mediaObjectKey ?? null : null,
+          mediaObjectKey: MEDIA_BACKED_KINDS.has(body.kind) ? body.mediaObjectKey ?? null : null,
           imageWidth: body.kind === 'IMAGE' ? body.imageWidth ?? null : null,
           imageHeight: body.kind === 'IMAGE' ? body.imageHeight ?? null : null,
           durationSec: body.kind === 'VOICE' ? body.durationSec ?? null : null,
           waveform:
             body.kind === 'VOICE' && body.waveform ? (body.waveform as Prisma.InputJsonValue) : Prisma.JsonNull,
+          // DOCUMENT/VIDEO MIME.
+          mediaMimeType: body.kind === 'DOCUMENT' || body.kind === 'VIDEO' ? body.mediaMimeType ?? null : null,
+          // VIDEO.
+          videoDurationSec: body.kind === 'VIDEO' ? body.videoDurationSec ?? null : null,
+          videoWidth: body.kind === 'VIDEO' ? body.videoWidth ?? null : null,
+          videoHeight: body.kind === 'VIDEO' ? body.videoHeight ?? null : null,
+          // LOCATION.
+          latitude: body.kind === 'LOCATION' ? body.latitude ?? null : null,
+          longitude: body.kind === 'LOCATION' ? body.longitude ?? null : null,
+          locationName: body.kind === 'LOCATION' ? body.locationName ?? null : null,
+          // CONTACT_CARD.
+          contactName: body.kind === 'CONTACT_CARD' ? body.contactName ?? null : null,
+          contactPhoneE164: body.kind === 'CONTACT_CARD' ? body.contactPhoneE164 ?? null : null,
+          // DOCUMENT.
+          documentTitle: body.kind === 'DOCUMENT' ? body.documentTitle ?? null : null,
+          documentSizeBytes:
+            body.kind === 'DOCUMENT' && body.documentSizeBytes !== undefined
+              ? BigInt(body.documentSizeBytes)
+              : null,
           replyToMessageId: body.replyToMessageId ?? null,
         },
       });

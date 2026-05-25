@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ChatKind, Prisma } from '@prisma/client';
+import { ChatKind, MessageKind, Prisma } from '@prisma/client';
 import {
   ChatFilterCriteriaSchema,
   brandAsMasked,
@@ -36,19 +36,38 @@ function isChatCursor(raw: unknown): raw is ChatCursor {
 }
 
 function previewForMessage(m: {
-  kind: 'TEXT' | 'VOICE' | 'IMAGE' | 'SYSTEM';
+  kind: MessageKind;
   text: string | null;
   durationSec: number | null;
 }): string {
-  if (m.kind === 'TEXT') return m.text ?? '';
-  if (m.kind === 'VOICE') {
-    const secs = m.durationSec ?? 0;
-    const mm = Math.floor(secs / 60);
-    const ss = (secs % 60).toString().padStart(2, '0');
-    return `Voice note · ${mm}:${ss}`;
+  switch (m.kind) {
+    case 'TEXT':
+      return m.text ?? '';
+    case 'VOICE': {
+      const secs = m.durationSec ?? 0;
+      const mm = Math.floor(secs / 60);
+      const ss = (secs % 60).toString().padStart(2, '0');
+      return `Voice note · ${mm}:${ss}`;
+    }
+    case 'IMAGE':
+      return 'Photo';
+    case 'VIDEO':
+      return '📹 Video';
+    case 'DOCUMENT':
+      return '📄 Document';
+    case 'LOCATION':
+    case 'LOCATION_LIVE':
+      return '📍 Location';
+    case 'CONTACT_CARD':
+      return '👤 Contact';
+    case 'POLL':
+      return '📊 Poll';
+    case 'CALL_EVENT':
+      return m.text ?? 'Call';
+    case 'SYSTEM':
+    default:
+      return '';
   }
-  if (m.kind === 'IMAGE') return 'Photo';
-  return '';
 }
 
 /**

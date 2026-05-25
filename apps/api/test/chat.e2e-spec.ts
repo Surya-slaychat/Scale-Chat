@@ -383,6 +383,119 @@ describe('1-on-1 chat (REST happy path)', () => {
     expect(rows).toEqual([{ emoji: '❤️', userId: bob.id }]);
   });
 
+  // ─── Tranche 2.B — extended message kinds (DOCUMENT / VIDEO / LOCATION / CONTACT_CARD) ───
+  //
+  // Backend-only schema foundation: the new kinds are sendable + persist +
+  // round-trip through GET, and server-only kinds are rejected. No mobile UI.
+
+  async function oneOnOne(): Promise<string> {
+    const create = await authedInject(testApp, {
+      method: 'POST',
+      url: '/chats/one-on-one',
+      token: alice.accessToken,
+      payload: { contactUserId: bob.id },
+    });
+    return create.json<{ chatId: string }>().chatId;
+  }
+
+  // A media key matching the sender-prefix + extension contract (see MediaService.validateObjectKey).
+  function docKey(userId: string, ext = 'pdf'): string {
+    const prefix = userId.replace(/-/g, '').slice(0, 8).toLowerCase();
+    return `chat-media/${prefix}/00000000-0000-4000-8000-000000000000.${ext}`;
+  }
+
+  it('send DOCUMENT persists documentTitle + mediaMimeType and round-trips', async () => {
+    const chatId = await oneOnOne();
+    const res = await authedInject(testApp, {
+      method: 'POST',
+      url: `/chats/${chatId}/messages`,
+      token: alice.accessToken,
+      payload: {
+        kind: 'DOCUMENT',
+        clientMessageId: cli(),
+        mediaObjectKey: docKey(alice.id, 'pdf'),
+        mediaMimeType: 'application/pdf',
+        documentTitle: 'Q3 report.pdf',
+        documentSizeBytes: 248_000,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const dto = res.json<{ kind: string; documentTitle: string; mediaMimeType: string }>();
+    expect(dto.kind).toBe('DOCUMENT');
+    expect(dto.documentTitle).toBe('Q3 report.pdf');
+    expect(dto.mediaMimeType).toBe('application/pdf');
+  });
+
+  it('send DOCUMENT without mediaMimeType → 400', async () => {
+    const chatId = await oneOnOne();
+    const res = await authedInject(testApp, {
+      method: 'POST',
+      url: `/chats/${chatId}/messages`,
+      token: alice.accessToken,
+      payload: {
+        kind: 'DOCUMENT',
+        clientMessageId: cli(),
+        mediaObjectKey: docKey(alice.id, 'pdf'),
+        documentTitle: 'no-mime.pdf',
+        documentSizeBytes: 100,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('send LOCATION persists lat/lng; out-of-range latitude → 400', async () => {
+    const chatId = await oneOnOne();
+    const ok = await authedInject(testApp, {
+      method: 'POST',
+      url: `/chats/${chatId}/messages`,
+      token: alice.accessToken,
+      payload: { kind: 'LOCATION', clientMessageId: cli(), latitude: 19.076, longitude: 72.8777, locationName: 'Mumbai' },
+    });
+    expect(ok.statusCode).toBe(201);
+    expect(ok.json<{ latitude: number; longitude: number }>().latitude).toBeCloseTo(19.076);
+
+    const bad = await authedInject(testApp, {
+      method: 'POST',
+      url: `/chats/${chatId}/messages`,
+      token: alice.accessToken,
+      payload: { kind: 'LOCATION', clientMessageId: cli(), latitude: 200, longitude: 0 },
+    });
+    expect(bad.statusCode).toBe(400);
+  });
+
+  it('send CONTACT_CARD persists name/phone; bad E.164 → 400', async () => {
+    const chatId = await oneOnOne();
+    const ok = await authedInject(testApp, {
+      method: 'POST',
+      url: `/chats/${chatId}/messages`,
+      token: alice.accessToken,
+      payload: { kind: 'CONTACT_CARD', clientMessageId: cli(), contactName: 'Priya', contactPhoneE164: '+919620304050' },
+    });
+    expect(ok.statusCode).toBe(201);
+    expect(ok.json<{ contactName: string }>().contactName).toBe('Priya');
+
+    const bad = await authedInject(testApp, {
+      method: 'POST',
+      url: `/chats/${chatId}/messages`,
+      token: alice.accessToken,
+      payload: { kind: 'CONTACT_CARD', clientMessageId: cli(), contactName: 'X', contactPhoneE164: '12345' },
+    });
+    expect(bad.statusCode).toBe(400);
+  });
+
+  it('client-supplied server-only kinds (POLL / CALL_EVENT / SYSTEM) → 400', async () => {
+    const chatId = await oneOnOne();
+    for (const kind of ['POLL', 'CALL_EVENT', 'SYSTEM', 'LOCATION_LIVE']) {
+      const res = await authedInject(testApp, {
+        method: 'POST',
+        url: `/chats/${chatId}/messages`,
+        token: alice.accessToken,
+        payload: { kind, clientMessageId: cli(), text: 'nope' },
+      });
+      expect(res.statusCode).toBe(400);
+    }
+  });
+
   // Phase 2 cases (11-13) — extended as the features land.
   it.todo('Case 11 — Phase 2.2 Edit: in-window 200, outside-window 400 edit_window_expired');
   it.todo('Case 12 — Phase 2.4 Forward: hop count + non-member-of-target 403');

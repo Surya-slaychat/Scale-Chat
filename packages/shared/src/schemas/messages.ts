@@ -3,8 +3,33 @@ import { z } from 'zod';
 import { paginatedResponse } from './common.js';
 import { ReactionAggregateSchema } from './reactions.js';
 
-export const MessageKindEnum = z.enum(['TEXT', 'VOICE', 'IMAGE', 'SYSTEM']);
+export const MessageKindEnum = z.enum([
+  'TEXT',
+  'VOICE',
+  'IMAGE',
+  'SYSTEM',
+  'DOCUMENT',
+  'VIDEO',
+  'LOCATION',
+  'LOCATION_LIVE',
+  'CONTACT_CARD',
+  'POLL',
+  'CALL_EVENT',
+]);
 export type MessageKind = z.infer<typeof MessageKindEnum>;
+
+/**
+ * Kinds the client may NEVER send directly — they're authored server-side
+ * (SYSTEM tombstones/notices, POLL via the polls module, CALL_EVENT via the
+ * calls module, LOCATION_LIVE via a future live-location stream). `SendMessageSchema`
+ * rejects them with `kind_not_allowed_from_client`.
+ */
+export const SERVER_ONLY_KINDS: ReadonlySet<MessageKind> = new Set([
+  'SYSTEM',
+  'POLL',
+  'CALL_EVENT',
+  'LOCATION_LIVE',
+]);
 
 export const MessageStatusEnum = z.enum(['sending', 'sent', 'delivered', 'read', 'failed']);
 export type MessageStatus = z.infer<typeof MessageStatusEnum>;
@@ -35,6 +60,28 @@ export const MessageSchema = z.object({
   imageHeight: z.number().int().positive().nullable(),
   durationSec: z.number().int().nullable(),
   waveform: z.array(z.number()).nullable(),
+  /** DOCUMENT/VIDEO: exact MIME (drives the bubble icon + download). Null otherwise. */
+  mediaMimeType: z.string().nullable().default(null),
+  /** VIDEO only. */
+  videoDurationSec: z.number().int().nullable().default(null),
+  videoWidth: z.number().int().positive().nullable().default(null),
+  videoHeight: z.number().int().positive().nullable().default(null),
+  /** LOCATION / LOCATION_LIVE. */
+  latitude: z.number().nullable().default(null),
+  longitude: z.number().nullable().default(null),
+  locationName: z.string().nullable().default(null),
+  /** CONTACT_CARD. */
+  contactName: z.string().nullable().default(null),
+  contactPhoneE164: z.string().nullable().default(null),
+  /** DOCUMENT. */
+  documentTitle: z.string().nullable().default(null),
+  documentSizeBytes: z.number().int().nonnegative().nullable().default(null),
+  /** Forward (Tranche 2.E) — `forwardedFromMessageId` is server-only; clients see `forwardCount` for the "Forwarded many times" pill. */
+  forwardedFromMessageId: z.string().uuid().nullable().default(null),
+  forwardCount: z.number().int().nonnegative().default(0),
+  /** Pin (Tranche 2.E). */
+  pinnedAt: z.string().datetime().nullable().default(null),
+  pinnedByUserId: z.string().uuid().nullable().default(null),
   replyToMessageId: z.string().uuid().nullable(),
   createdAt: z.string().datetime(),
   /**
@@ -104,9 +151,33 @@ export const SendMessageSchema = z
     imageHeight: z.number().int().positive().max(20_000).optional(),
     durationSec: z.number().int().positive().max(300).optional(),
     waveform: z.array(z.number().min(0).max(1)).max(120).optional(),
+    /** DOCUMENT/VIDEO — exact MIME of the uploaded object. */
+    mediaMimeType: z.string().min(1).max(80).optional(),
+    /** VIDEO only. */
+    videoDurationSec: z.number().int().positive().max(7_200).optional(),
+    videoWidth: z.number().int().positive().max(20_000).optional(),
+    videoHeight: z.number().int().positive().max(20_000).optional(),
+    /** LOCATION only. */
+    latitude: z.number().min(-90).max(90).optional(),
+    longitude: z.number().min(-180).max(180).optional(),
+    locationName: z.string().trim().min(1).max(120).optional(),
+    /** CONTACT_CARD only. */
+    contactName: z.string().trim().min(1).max(120).optional(),
+    contactPhoneE164: z.string().regex(/^\+[1-9]\d{7,14}$/).optional(),
+    /** DOCUMENT only. */
+    documentTitle: z.string().trim().min(1).max(255).optional(),
+    documentSizeBytes: z.number().int().positive().max(104_857_600).optional(),
     replyToMessageId: z.string().uuid().optional(),
   })
   .superRefine((v, ctx) => {
+    if (SERVER_ONLY_KINDS.has(v.kind)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `kind_not_allowed_from_client: ${v.kind} messages are authored server-side`,
+        path: ['kind'],
+      });
+      return;
+    }
     if (v.kind === 'TEXT' && !v.text) {
       ctx.addIssue({ code: 'custom', message: 'text is required for TEXT messages', path: ['text'] });
     }
@@ -139,6 +210,44 @@ export const SendMessageSchema = z
           path: ['imageWidth'],
         });
       }
+    }
+    if (v.kind === 'DOCUMENT') {
+      if (!v.mediaObjectKey || !v.mediaMimeType || !v.documentTitle || v.documentSizeBytes === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'mediaObjectKey, mediaMimeType, documentTitle and documentSizeBytes are required for DOCUMENT messages',
+          path: ['mediaObjectKey'],
+        });
+      }
+    }
+    if (v.kind === 'VIDEO') {
+      if (
+        !v.mediaObjectKey ||
+        !v.mediaMimeType ||
+        v.videoDurationSec === undefined ||
+        v.videoWidth === undefined ||
+        v.videoHeight === undefined
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'mediaObjectKey, mediaMimeType, videoDurationSec, videoWidth and videoHeight are required for VIDEO messages',
+          path: ['mediaObjectKey'],
+        });
+      }
+    }
+    if (v.kind === 'LOCATION' && (v.latitude === undefined || v.longitude === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'latitude and longitude are required for LOCATION messages',
+        path: ['latitude'],
+      });
+    }
+    if (v.kind === 'CONTACT_CARD' && (!v.contactName || !v.contactPhoneE164)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'contactName and contactPhoneE164 are required for CONTACT_CARD messages',
+        path: ['contactName'],
+      });
     }
   });
 export type SendMessageBody = z.infer<typeof SendMessageSchema>;

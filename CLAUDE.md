@@ -50,6 +50,34 @@ npm run db:setup:dry           # walk through every step without executing it
 
 `apps/api/` — read its [`README.md`](apps/api/README.md) before changing anything in `apps/api/src/common/` (privacy interceptor, refresh-rotation, JWT). Those are load-bearing for chat once it ships.
 
+## Working principles (coding discipline)
+
+> Behavioral guidelines to reduce common mistakes. These bias toward caution over speed — for trivial tasks, use judgment.
+
+**1. Think before coding** — Don't assume. Don't hide confusion. Surface tradeoffs.
+- State assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop, name what's confusing, and ask.
+
+**2. Simplicity first** — Minimum code that solves the problem. Nothing speculative.
+- No features beyond what was asked; no abstractions for single-use code.
+- No "flexibility"/"configurability" that wasn't requested; no error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+- Ask: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+**3. Surgical changes** — Touch only what you must. Clean up only your own mess.
+- Don't "improve" adjacent code, comments, or formatting; don't refactor what isn't broken.
+- Match existing style, even if you'd do it differently.
+- Remove imports/variables/functions that *your* changes orphaned; leave pre-existing dead code alone (mention it, don't delete it).
+- The test: every changed line should trace directly to the request.
+
+**4. Goal-driven execution** — Define success criteria, then loop until verified.
+- "Add validation" → write tests for invalid inputs, then make them pass.
+- "Fix the bug" → write a test that reproduces it, then make it pass.
+- "Refactor X" → ensure tests pass before and after.
+- For multi-step tasks, state a brief plan with a verify step for each item.
+
 ## Status snapshot
 
 > Per `my-app/CLAUDE.md` §7 working agreement, every behavior-changing commit must update this table AND the matching `docs/progress/<slice>.md` file in the same PR, or include `[skip-claudemd] <reason>` in the message. Self-learning loop — see `docs/progress/contact-page.md` for the canonical example.
@@ -64,6 +92,8 @@ npm run db:setup:dry           # walk through every step without executing it
 > **Tranche 2.0 (dev pipeline docs)** landed 2026-05-25 (`e70ce46`): `my-app/instruction-to-run-the-app.md` created (fixes the broken `my-app/CLAUDE.md` row 9 reference + documents the correct backend port 4000 + emulator `10.0.2.2` networking), `my-app/CLAUDE.md` gains §7.5 Build pipeline subsection codifying dev-client-only Android flow, 3 helper npm scripts added to `my-app/package.json` (`prebuild:android`, `dev:android`, `dev:start`). **Zero native deps installed; zero prebuilds run** — those happen per-feature-tranche as needed. iOS + EAS deferred to Tranche 2.I when call testing requires real-device distribution. A Knowledge base of 10 native-dep gotchas (MultiDex, Gradle heap, ABI restrict, Maps API key, AudioFocus collision, `Duplicate jniLibs` warning, CNG-style gitignored android/, port 4000, Fabric compat, first-build time) is captured in `docs/progress/1-on-1-chat-expansion.md` § "Knowledge base for future native-dep tranches" — gates relevant later tranches.
 >
 > **Tranche 2.A (Reactions mobile UI)** landed 2026-05-25 (`c23365f` + mock follow-up): long-press reactions strip (`😅 👍 😆 😍 ❤️ 💯 🙏` + picker chip), `rn-emoji-keyboard@^1.7.0` full picker (pure-JS, Expo-Go-compatible), reactions pill row under bubbles, `chatSocket.onReactionUpdated` socket sync, optimistic `addReaction`/`removeReaction` on both api + mock repos (`bumpReactionLocally` with restore-on-failure). `MessageDto.reactions` (PR 4 backend) now plumbed through `dto-to-message.ts` → `types.ts` → bubble. Mock repo + seed support reactions for offline dev (CLAUDE.md §3). **QA-passed on Android emulator** (mock mode): strip renders above action sheet, picker opens + dark-themed, emoji-select → pill `😀 1` renders. 50/50 Jest green. Files: `reactions-strip.tsx`, `reactions-pill-row.tsx`, `emoji-picker-modal.tsx` (new) + edits to `message-action-sheet.tsx`, `message-bubble.tsx`, `chat/[id].tsx`, `chat-socket.ts`, `chat-repository.ts`, `api-chat-repository.ts`, `mock-chat-repository.ts`, `seed.ts`, `dto-to-message.ts`, `types.ts`.
+>
+> **Tranche 2.B (Schema foundation)** landed 2026-05-25: backend-only keystone unblocking 2.C/2.D/2.F. `MessageKind` enum +7 values (`DOCUMENT, VIDEO, LOCATION, LOCATION_LIVE, CONTACT_CARD, POLL, CALL_EVENT`); Migration A (`20260525211223_expand_message_kind_and_media_fields`) adds 16 nullable `Message` columns (`mediaMimeType`, `video*`, `latitude/longitude/locationName/liveLocationExpiresAt`, `contact*`, `document*`, `forwardedFromMessageId/forwardCount`, `pinned*`) + 2 indexes + 2 FKs. `MediaService` accepts DOCUMENT (100MB, pdf/doc/xls/ppt/csv/zip) + VIDEO (80MB, mp4/mov/webm) via a per-kind `CONTENT_RULES`/`MEDIA_RULES` map. `SendMessageSchema` gains discriminated `superRefine` branches (DOCUMENT/VIDEO/LOCATION/CONTACT_CARD) + a `SERVER_ONLY_KINDS` guard (`SYSTEM/POLL/CALL_EVENT/LOCATION_LIVE` → 400 `kind_not_allowed_from_client`, enforced in shared zod AND `messages.service`). `messages.service` create-data + `rowToDto` + `MessageDto` carry all new fields; chat-list `previewForMessage` handles new kinds ("📄 Document", "📍 Location", etc.). **26/26 e2e green** (5 new cases); fixed `jest-e2e.config.js` `maxWorkers: 1` (2-suite parallel run was deadlocking on the shared `test_e2e` TRUNCATE). Forward/Pin columns land here per the BRD's one-foundational-migration decision (endpoints ship in 2.E). **Note:** `StarredMessage` model is pre-existing un-migrated schema-drift (Star feature deferred) — deliberately excluded from Migration A. **Note:** local e2e in this env needs `TEST_DATABASE_URL_BASE`/`TEST_REDIS_URL` overrides to point at the docker pg on 5432/6379 (config defaults to a dedicated 5433/6380 test instance).
 
 | Slice | Mobile | Backend | Notes |
 |---|---|---|---|

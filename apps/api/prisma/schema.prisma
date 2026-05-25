@@ -45,6 +45,7 @@ model User {
   blockedBy       BlockedUser[]  @relation("BlockedTargetUser")
   starredMessages StarredMessage[] @relation("UserStarredMessages")
   messageReactions MessageReaction[] @relation("UserReactions")
+  pinnedMessages  Message[]      @relation("MessagePinnedBy")
 
   @@index([phoneE164])
   @@map("users")
@@ -270,6 +271,29 @@ model Message {
   imageHeight       Int?
   durationSec       Int?
   waveform          Json?
+  /// DOCUMENT/VIDEO: exact MIME so the bubble picks the right icon + the client passes it back on download.
+  mediaMimeType     String?      @db.VarChar(80)
+  /// VIDEO only.
+  videoDurationSec  Int?
+  videoWidth        Int?
+  videoHeight       Int?
+  /// LOCATION / LOCATION_LIVE.
+  latitude          Float?       @db.DoublePrecision
+  longitude         Float?       @db.DoublePrecision
+  locationName      String?      @db.VarChar(120)
+  liveLocationExpiresAt DateTime? @db.Timestamptz(6)
+  /// CONTACT_CARD.
+  contactName       String?      @db.VarChar(120)
+  contactPhoneE164  String?      @db.VarChar(20)
+  /// DOCUMENT.
+  documentTitle     String?      @db.VarChar(255)
+  documentSizeBytes BigInt?
+  /// Forward (Tranche 2.E builds the endpoint; column lands here as the schema foundation).
+  forwardedFromMessageId String? @db.Uuid
+  forwardCount      Int          @default(0)
+  /// Pin (Tranche 2.E builds the endpoint; columns land here as the schema foundation).
+  pinnedAt          DateTime?    @db.Timestamptz(6)
+  pinnedByUserId    String?      @db.Uuid
   replyToMessageId  String?      @db.Uuid
   createdAt         DateTime     @default(now()) @db.Timestamptz(6)
   deletedAt         DateTime?    @db.Timestamptz(6)
@@ -278,6 +302,9 @@ model Message {
   sender            User         @relation("MessageSender", fields: [senderUserId], references: [id], onDelete: Restrict)
   replyTo           Message?     @relation("MessageReply", fields: [replyToMessageId], references: [id], onDelete: SetNull)
   replies           Message[]    @relation("MessageReply")
+  forwardedFrom     Message?     @relation("MessageForwards", fields: [forwardedFromMessageId], references: [id], onDelete: SetNull)
+  forwardedCopies   Message[]    @relation("MessageForwards")
+  pinnedBy          User?        @relation("MessagePinnedBy", fields: [pinnedByUserId], references: [id], onDelete: SetNull)
   chatLastForChat   Chat[]       @relation("ChatLastMessage")
   reports           MessageReport[] @relation("ReportedMessage")
   stars             StarredMessage[] @relation("MessageStars")
@@ -286,6 +313,8 @@ model Message {
   @@unique([senderUserId, clientMessageId])
   @@unique([chatId, sequence])
   @@index([chatId, createdAt])
+  @@index([forwardedFromMessageId])
+  @@index([chatId, pinnedAt])
   @@map("messages")
 }
 
@@ -294,6 +323,13 @@ enum MessageKind {
   VOICE
   IMAGE
   SYSTEM
+  DOCUMENT
+  VIDEO
+  LOCATION
+  LOCATION_LIVE
+  CONTACT_CARD
+  POLL
+  CALL_EVENT
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

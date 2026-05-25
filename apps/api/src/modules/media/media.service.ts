@@ -8,10 +8,14 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  DOCUMENT_CONTENT_TYPES,
+  DOCUMENT_MAX_BYTES,
   IMAGE_CONTENT_TYPES,
   IMAGE_MAX_BYTES,
   type MediaUploadKind,
   type MediaUploadResponse,
+  VIDEO_CONTENT_TYPES,
+  VIDEO_MAX_BYTES,
   VOICE_CONTENT_TYPES,
   VOICE_MAX_BYTES,
 } from '@scalechat/shared';
@@ -30,11 +34,33 @@ const EXT_BY_CONTENT_TYPE: Record<string, string> = {
   'audio/mp4': 'm4a',
   'audio/aac': 'aac',
   'audio/m4a': 'm4a',
+  'application/pdf': 'pdf',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.ms-powerpoint': 'ppt',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'text/csv': 'csv',
+  'application/zip': 'zip',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'video/webm': 'webm',
 };
 
 const VALID_EXTS_BY_KIND: Record<MediaUploadKind, readonly string[]> = {
   IMAGE: ['jpg', 'jpeg', 'png', 'webp'],
   VOICE: ['m4a', 'aac'],
+  DOCUMENT: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'csv', 'zip'],
+  VIDEO: ['mp4', 'mov', 'webm'],
+};
+
+/** Per-kind content-type allowlist + byte cap; mirrors the shared MediaUploadRequestSchema rules. */
+const CONTENT_RULES: Record<MediaUploadKind, { contentTypes: readonly string[]; maxBytes: number }> = {
+  IMAGE: { contentTypes: IMAGE_CONTENT_TYPES, maxBytes: IMAGE_MAX_BYTES },
+  VOICE: { contentTypes: VOICE_CONTENT_TYPES, maxBytes: VOICE_MAX_BYTES },
+  DOCUMENT: { contentTypes: DOCUMENT_CONTENT_TYPES, maxBytes: DOCUMENT_MAX_BYTES },
+  VIDEO: { contentTypes: VIDEO_CONTENT_TYPES, maxBytes: VIDEO_MAX_BYTES },
 };
 
 /**
@@ -186,32 +212,18 @@ export class MediaService {
     contentType: string,
     sizeBytes: number,
   ): void {
-    if (kind === 'IMAGE') {
-      if (!(IMAGE_CONTENT_TYPES as readonly string[]).includes(contentType)) {
-        throw new BadRequestException({
-          code: 'invalid_content_type',
-          message: `contentType must be one of: ${IMAGE_CONTENT_TYPES.join(', ')}`,
-        });
-      }
-      if (sizeBytes > IMAGE_MAX_BYTES) {
-        throw new BadRequestException({
-          code: 'file_too_large',
-          message: `Image exceeds max size (${IMAGE_MAX_BYTES} bytes).`,
-        });
-      }
-    } else {
-      if (!(VOICE_CONTENT_TYPES as readonly string[]).includes(contentType)) {
-        throw new BadRequestException({
-          code: 'invalid_content_type',
-          message: `contentType must be one of: ${VOICE_CONTENT_TYPES.join(', ')}`,
-        });
-      }
-      if (sizeBytes > VOICE_MAX_BYTES) {
-        throw new BadRequestException({
-          code: 'file_too_large',
-          message: `Voice note exceeds max size (${VOICE_MAX_BYTES} bytes).`,
-        });
-      }
+    const rule = CONTENT_RULES[kind];
+    if (!rule.contentTypes.includes(contentType)) {
+      throw new BadRequestException({
+        code: 'invalid_content_type',
+        message: `contentType must be one of: ${rule.contentTypes.join(', ')}`,
+      });
+    }
+    if (sizeBytes > rule.maxBytes) {
+      throw new BadRequestException({
+        code: 'file_too_large',
+        message: `${kind} exceeds max size (${rule.maxBytes} bytes).`,
+      });
     }
   }
 }

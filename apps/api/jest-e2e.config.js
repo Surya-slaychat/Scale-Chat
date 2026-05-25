@@ -39,4 +39,9 @@ module.exports = {
   globalSetup: '<rootDir>/test/global-setup.ts',
   globalTeardown: '<rootDir>/test/global-teardown.ts',
   testTimeout: 30_000,
+  // All suites share the single `test_e2e` schema and truncate tables between
+  // tests — so they MUST run serially. Parallel workers deadlock on TRUNCATE
+  // and corrupt each other's seeded rows (FK violations). One worker keeps the
+  // shared-schema design correct; the suite is small enough that serial is fast.
+  maxWorkers: 1,
 };

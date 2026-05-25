@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { paginatedResponse } from './common.js';
 import { ContactPublicSchema } from './contacts.js';
+import { MessageKindEnum } from './messages.js';
 
 const e164India = z
   .string()
@@ -17,8 +18,8 @@ const LastMessagePreviewSchema = z.object({
   id: z.string().uuid(),
   /** Sender id — for the owner this maps to "me", otherwise the counterpart. */
   senderUserId: z.string().uuid(),
-  kind: z.enum(['TEXT', 'VOICE', 'IMAGE', 'SYSTEM']),
-  /** Preview text; voice/image kinds carry a placeholder like "Voice note · 0:39". */
+  kind: MessageKindEnum,
+  /** Preview text; non-text kinds carry a placeholder like "Voice note · 0:39" or "📄 Document". */
   preview: z.string(),
   createdAt: z.string().datetime(),
   sequence: z.string(),
