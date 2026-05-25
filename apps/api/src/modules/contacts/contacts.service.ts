@@ -3,8 +3,10 @@ import type {
   AddContactBody,
   CommonGroupsListResponse,
   Contact,
+  ContactDiscoveryMatch,
   ContactsListQuery,
   ContactsListResponse,
+  DiscoverContactsResponse,
   UpdateContactBody,
 } from '@scalechat/shared';
 
@@ -196,5 +198,58 @@ export class ContactsService {
         memberCount: r._count.members,
       })),
     };
+  }
+
+  /**
+   * Stateless device-contacts lookup. Match the submitted phones against the
+   * `users` table and return ONLY the on-platform matches — no row writes,
+   * no persistence.
+   *
+   * Privacy contract (`docs/progress/device-contacts.md`):
+   *   - Response payload MUST NOT include any user `id` field.
+   *   - Caller's own number is silently dropped from matches (not relevant
+   *     and avoids an "I am on the platform" tautology in the response).
+   *   - Returned `displayName` is the platform-side `fullName`, not the
+   *     contact's locally-saved display name (the caller already has that
+   *     from their device).
+   *
+   * `phoneE164` is `@unique` on User — `IN (...)` hits the index.
+   */
+  async discover(callerUserId: string, phones: string[]): Promise<DiscoverContactsResponse> {
+    if (phones.length === 0) return { matches: [] };
+    // Dedup defensively — zod already capped at 500, but the same phone twice
+    // shouldn't double-count against the user-table lookup.
+    const unique = Array.from(new Set(phones));
+    const users = await this.prisma.user.findMany({
+      where: { phoneE164: { in: unique } },
+      select: {
+        // NB: NOT selecting `id`. The privacy contract demands the matched
+        // user's UUID never leave the server in this payload — projecting at
+        // the SQL layer means there's no way to accidentally include it on
+        // the round-trip even if the DTO mapper drifts later.
+        phoneE164: true,
+        fullName: true,
+        avatarUri: true,
+      },
+    });
+    const matches: ContactDiscoveryMatch[] = users
+      .filter((u) => u.phoneE164 !== undefined) // belt-and-braces; phoneE164 is non-null on User
+      .map((u) => ({
+        phoneE164: u.phoneE164,
+        isOnPlatform: true as const,
+        displayName: u.fullName,
+        avatarUri: u.avatarUri ?? null,
+      }));
+    // Drop the caller's own row even if they smuggled their own phone into
+    // the batch — needs a second query to learn the caller's phone, but it's
+    // a `select-by-id` on the same indexed column, ~sub-ms.
+    const self = await this.prisma.user.findUnique({
+      where: { id: callerUserId },
+      select: { phoneE164: true },
+    });
+    const filtered = self
+      ? matches.filter((m) => m.phoneE164 !== self.phoneE164)
+      : matches;
+    return { matches: filtered };
   }
 }

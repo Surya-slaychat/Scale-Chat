@@ -14,8 +14,8 @@
 
 | Sub-PR | Scope | Status |
 |---|---|---|
-| **6.1 — Shared schemas + Jest harness** | Discover/Bulk zod schemas; expand `toE164India` for E.164-prefixed input; add edge-case tests | ✅ **Shipped** (this commit) |
-| **6.2 — Backend `POST /contacts/discover`** | Stateless discovery, rate-limited, privacy-shaped response | 🚧 Pending |
+| **6.1 — Shared schemas + Jest harness** | Discover/Bulk zod schemas; expand `toE164India` for E.164-prefixed input; add edge-case tests | ✅ Shipped (`07a61b3`) |
+| **6.2 — Backend `POST /contacts/discover`** | Stateless discovery, rate-limited, privacy-shaped response, first contacts e2e spec | ✅ **Shipped** (this commit) |
 | **6.3 — Backend `POST /contacts/bulk`** | Idempotent bulk save, transaction-based dedup | 🚧 Pending |
 | **6.4 — Frontend `expo-contacts` + Import Contacts modal** | `useDeviceContacts` hook, `/import-contacts` screen, "Pick from phonebook" entry | 🚧 Pending |
 
@@ -64,14 +64,82 @@ Catching this in PR 6.1 (under a test) instead of in PR 6.4 (as a stealth bug di
 
 ---
 
+## PR 6.2 — What shipped
+
+### Files touched
+
+- **`apps/api/src/modules/contacts/contacts.controller.ts`** — added `@Post('discover')` route (declared before `:id`-bearing routes so NestJS doesn't try to parse `"discover"` as a UUID). Wired `RateLimitService` injection; 10 req/min ceiling via `contacts:discover:{user.sub}` Redis ZSET key.
+- **`apps/api/src/modules/contacts/contacts.service.ts`** — added `discover(callerUserId, phones)` method. Defensively dedups the input batch, selects `phoneE164` + `fullName` + `avatarUri` only (NOT `id`) at the SQL layer, drops the caller's own phone from matches.
+- **`apps/api/test/contacts.e2e-spec.ts`** (new, first e2e for this module) — 6 cases:
+  1. Happy path — 3 submitted phones, 2 platform users → 2 matches with strict shape (`['avatarUri', 'displayName', 'isOnPlatform', 'phoneE164']`).
+  2. Privacy contract — `JSON.stringify(body)` grep'd for `"id":` and `/userId/i` → both must not match.
+  3. Self-filter — submitting caller's own phone alongside others → caller silently dropped.
+  4. Empty array → 400 (zod `.min(1)`).
+  5. Malformed E.164 (`9876543210` without `+91`) → 400 (zod regex).
+  6. Unauthenticated → 401 (Bearer required).
+  7. Rate limit — 10 successful calls then 11th returns 429 with `{ error: { code: 'rate_limited' } }`.
+
+### Privacy enforcement — three layers of defense
+
+This was the most security-sensitive code path in the PR. Three layers were stacked so a single regression can't leak `userId`:
+
+1. **Static type contract** — `ContactDiscoveryMatchSchema` in `@scalechat/shared` has no `id` field. TypeScript refuses to assign a row with `id` to a `ContactDiscoveryMatch`.
+2. **SQL projection** — `prisma.user.findMany({ select: { phoneE164, fullName, avatarUri } })` doesn't include `id` in the SQL projection. Even raw row-spread (`...row`) couldn't surface a `userId`.
+3. **DTO mapper** — the service maps each row to an explicit 4-field object, no spreads. Adding fields to `User` won't accidentally widen the response.
+
+The e2e test `JSON.stringify(body)` regex check is a fourth gate: any future code change that re-introduces `id` (e.g. someone adding a `_count` include) trips the test.
+
+### Adaptation note — global exception filter wraps errors
+
+The first test run failed on the rate-limit assertion. The controller throws `new HttpException({ code: 'rate_limited', ... }, 429)`, but the response body is `{ error: { code: 'rate_limited', ... } }` — there's a global `HttpExceptionFilter` at `apps/api/src/common/filters/http-exception.filter.ts` that wraps every error into a stable `{ error: { code, message, requestId } }` envelope. The test now asserts `body.error.code` instead of `body.code`. This is the canonical shape for ALL API errors, not specific to rate-limiting.
+
+### Verification
+
+- `npm --workspace=apps/api run test:e2e -- --testPathPattern="contacts"` → **6/6 passing** (with `TEST_DATABASE_URL_BASE` pointing at `localhost:5432` instead of the default `5433` — the dev containers run on the canonical ports).
+- `npm run shared:build` clean.
+
+### Live API smoke test
+
+```
+curl -X POST http://localhost:4000/contacts/discover \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"phones":["+919812345678","+919999999999"]}'
+# → { "matches": [{ "phoneE164": "+919812345678", "isOnPlatform": true, ... }] }
+```
+
+The ghost phone `+919999999999` doesn't exist in the seeded `users` table, so only the real one comes back.
+
+---
+
+## Plan adaptation log (running)
+
+- **PR 6.1**: Jest harness was already in place from a prior session. Scope narrowed to extending the existing `phone.test.ts` with E.164-prefixed cases + fixing `toE164India()`.
+- **PR 6.2**: First test run revealed the global error filter wrapping shape. Test assertion updated; no controller/service change needed. Container ports differ from the e2e harness default (5432/6379 vs 5433/6380) — invoke with `TEST_DATABASE_URL_BASE` + `TEST_REDIS_URL` env overrides.
+
+---
+
 ## Next-developer pickup notes
 
-If you (or the next Claude session) are starting PR 6.2:
+If you (or the next Claude session) are starting **PR 6.3 (bulk save)**:
 
-1. **Use the existing schemas** — `DiscoverContactsSchema` is in `@scalechat/shared`, validate with the existing `ZodValidationPipe` pattern.
-2. **The privacy contract is enforced by the response schema, not just the controller.** `ContactDiscoveryMatchSchema` does NOT have an `id` field — if you accidentally include one in the service response, runtime zod won't catch it (zod stripping is opt-in via `.strip()`), but the static TS type will refuse the assignment. Trust the type.
-3. **Rate-limit pattern** — see `apps/api/src/modules/media/media.controller.ts:39-59`. Key: `contacts:discover:{user.sub}`, limit 10/min.
-4. **The `phoneE164` index on `users`** is already in place (it's the `@unique` constraint) — `WHERE phoneE164 IN (...)` is an index scan, no migration needed.
-5. **First e2e test** — there's no `apps/api/test/contacts.e2e-spec.ts` yet. Copy the shape from `apps/api/test/chat.e2e-spec.ts`. The harness (`setup-e2e.ts`) already provides `seedUser()`, `authedInject()`, `truncateAll()`.
+1. **Pattern-match `discover()`** — same module, mirror its `findMany` → DTO-map shape, but flip from `prisma.user` to `prisma.contact`. The plan in `.claude/plans/*` has the step-by-step.
+2. **The `(ownerUserId, phoneE164)` unique constraint already exists** — see `schema.prisma:178`. The transaction logic is: `findMany` existing pairs, partition input into `toCreate` vs `alreadyHad`, run `createMany`, then `findMany` the new rows by `(ownerUserId, phoneE164)` to return them as full DTOs (PG `createMany` doesn't return rows).
+3. **Reuse the rate-limit pattern** that PR 6.2 just shipped — same constants block at the top of `contacts.controller.ts`, just a different key: `contacts:bulk:{user.sub}`, 5 req/min.
+4. **Self-add guard** — mirror `add()` lines 96-102. The bulk version should filter the caller's own phone from `items` BEFORE the existing-pairs lookup, otherwise it'll appear in `alreadyHad` even though no row was created.
+5. **The global error filter wraps everything** — assert `body.error.code` not `body.code` in your e2e (PR 6.2 hit this pitfall, documented in the adaptation log).
+6. **`prisma.createMany({ skipDuplicates: true })` is NOT used elsewhere** — the plan and `contacts.service.ts:add()` both rely on application-level dedup. Stay consistent.
 
-If you discover the audit / plan made a wrong assumption — like I did with the Jest setup — **adapt the plan and document it in this file**, don't blindly follow it.
+If you discover the audit / plan made a wrong assumption — like I did with the Jest setup in 6.1 and the error-envelope shape in 6.2 — **adapt the plan and document it in this file's adaptation log**, don't blindly follow it.
+
+### Running e2e tests locally
+
+The harness expects containers on ports 5433/6380 (the `db:setup` script's defaults). My active containers were on 5432/6379, so:
+
+```
+TEST_DATABASE_URL_BASE="postgresql://scalechat:scalechat@localhost:5432/scalechat" \
+TEST_REDIS_URL="redis://localhost:6379" \
+npm --workspace=apps/api run test:e2e -- --testPathPattern="contacts"
+```
+
+If you re-run `npm run db:setup` it'll start fresh containers on 5433/6380; then no env overrides needed.
