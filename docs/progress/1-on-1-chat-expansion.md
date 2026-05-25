@@ -132,8 +132,8 @@ These items are an executable checklist — when the gating tranche begins, the 
 
 | # | Name | Slice | Backend | Frontend | Migration | Depends on |
 |---|---|---|---|---|---|---|
-| **2.0** | Dev pipeline documentation | `instruction-to-run-the-app.md` + `my-app/CLAUDE.md` §7.5 + 3 helper npm scripts + Knowledge base K1–K10. **Docs-only; zero native deps installed.** | n/a | ✅ | — | — |
-| **2.A** | Reactions mobile UI | reactions picker + pill row + emoji modal | none | ✅ | — | 2.0 |
+| **2.0** | Dev pipeline documentation | `instruction-to-run-the-app.md` + `my-app/CLAUDE.md` §7.5 + 3 helper npm scripts + Knowledge base K1–K10. **Docs-only; zero native deps installed.** ✅ LANDED 2026-05-25 (`e70ce46`). | n/a | ✅ | — | — |
+| **2.A** | Reactions mobile UI | ✅ **LANDED 2026-05-25** (`c23365f` + mock follow-up). reactions strip + pill row + `rn-emoji-keyboard` picker + socket `reaction:updated` sync + optimistic add/remove (api + mock repos). QA-passed on Android emulator: strip renders, picker opens + themed, emoji-select → pill renders. | none | ✅ | — | 2.0 |
 | **2.B** | Schema foundation | `MessageKind` enum + media fields + extended validators | ✅ | none | A | 2.0 |
 | **2.E** | Forward + Pin + Message Info | 3 new modules + 3 new UI rows + ForwardPicker + MessageInfo screens + PinnedStrip | ✅ | ✅ | — | 2.B |
 | **2.H** | Calls signalling (server) | `CallSession` table + 100ms-or-LiveKit-Cloud client + ring/accept/decline/hangup REST + webhook + **`user:{userId}` socket room** + **BullMQ ring-timeout** | ✅ | none | C | 2.B + POC complete |
@@ -160,11 +160,12 @@ These items are an executable checklist — when the gating tranche begins, the 
 
 | Sub-item | Frontend | Backend | Notes |
 |---|---|---|---|
-| **A.1** Reactions strip on long-press | 🚫 | n/a | Default emojis: `😅 👍 😆 😍 ❤️ 💯 🙏` + plus chip; renders above existing MessageActionSheet rows |
-| **A.2** Emoji picker modal | 🚫 | n/a | `rn-emoji-keyboard` package; dark theme; slide-up modal |
-| **A.3** Reactions pill row under bubbles | 🚫 | n/a | Consumes `message.reactions: ReactionAggregate[]` (already in MessageDto) |
-| **A.4** Socket sync via `reaction:updated` | 🚫 | ✅ already broadcasts | Wire `chatSocket.onReactionUpdated` listener in `api-chat-repository.ts` |
-| **A.5** Optimistic add/remove + revert on failure | 🚫 | ✅ POST/DELETE shipped | Pattern mirrors existing image/voice optimistic sends |
+| **A.1** Reactions strip on long-press | ✅ | n/a | `reactions-strip.tsx` — emojis `😅 👍 😆 😍 ❤️ 💯 🙏` + plus chip; rendered above the MessageActionSheet rows. QA-verified on emulator. |
+| **A.2** Emoji picker modal | ✅ | n/a | `emoji-picker-modal.tsx` wrapping `rn-emoji-keyboard@^1.7.0` (pure JS, Expo-Go-compatible); dark theme. QA-verified: opens from + chip, themed correctly, emoji-select fires. |
+| **A.3** Reactions pill row under bubbles | ✅ | n/a | `reactions-pill-row.tsx` consumes `message.reactions: ReactionAggregate[]` (now carried through `dto-to-message.ts` + `types.ts`). QA-verified: pill `😀 1` renders below bubble after select. |
+| **A.4** Socket sync via `reaction:updated` | ✅ | ✅ already broadcasts | `chatSocket.onReactionUpdated` listener added; `api-chat-repository.ts` splices fresh aggregate into the cached message. |
+| **A.5** Optimistic add/remove + revert on failure | ✅ | ✅ POST/DELETE shipped | `addReaction`/`removeReaction` on both api + mock repos; optimistic `bumpReactionLocally` with restore-on-failure. Mirrors image/voice optimistic-send pattern. |
+| **A.6** Mock-repo + seed support | ✅ | n/a | `mock-chat-repository.ts` implements add/remove via `mutateReaction`; `seed.ts` seeds reactions on 2 messages so the pill row renders in offline dev mode (CLAUDE.md §3 frontend-first flow). |
 
 ### Files touched
 

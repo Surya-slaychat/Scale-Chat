@@ -61,6 +61,49 @@ function nextSequence(threadId: string): number {
   return msgs.reduce((max, m) => Math.max(max, m.sequence), 0) + 1;
 }
 
+/**
+ * Toggle a reaction aggregate on a message in place (mock-only). Mirrors the
+ * api repo's `bumpReactionLocally` math: add bumps/inserts + flips reactedByMe,
+ * remove decrements/drops. Searches every thread since the screen passes only
+ * a messageId.
+ */
+function mutateReaction(messageId: string, emoji: string, isAdd: boolean): void {
+  const s = getState();
+  for (const threadId of Object.keys(s.messagesByThread)) {
+    const list = s.messagesByThread[threadId]!;
+    const at = list.findIndex((m) => m.id === messageId);
+    if (at < 0) continue;
+    const msg = list[at]!;
+    const current = msg.reactions ?? [];
+    const ri = current.findIndex((r) => r.emoji === emoji);
+    let nextReactions = current;
+    if (isAdd) {
+      if (ri >= 0) {
+        if (current[ri]!.reactedByMe) return;
+        nextReactions = current.map((r, i) =>
+          i === ri ? { ...r, count: r.count + 1, reactedByMe: true } : r,
+        );
+      } else {
+        nextReactions = [...current, { emoji, count: 1, reactedByMe: true }];
+      }
+    } else {
+      if (ri < 0 || !current[ri]!.reactedByMe) return;
+      const nextCount = current[ri]!.count - 1;
+      nextReactions =
+        nextCount <= 0
+          ? current.filter((_, i) => i !== ri)
+          : current.map((r, i) => (i === ri ? { ...r, count: nextCount, reactedByMe: false } : r));
+    }
+    s.messagesByThread[threadId] = [
+      ...list.slice(0, at),
+      { ...msg, reactions: nextReactions } as Message,
+      ...list.slice(at + 1),
+    ];
+    persist();
+    return;
+  }
+}
+
 export const mockChatRepository: ChatRepository = {
   // Mock ignores customFilterId — custom filters require real backend persistence
   // and aren't useful against an in-memory seed. The arg is accepted to keep the
@@ -217,6 +260,20 @@ export const mockChatRepository: ChatRepository = {
   async unblockUser(userId) {
     await sleep();
     return { blockedUserId: userId, isBlocked: false };
+  },
+
+  // Reactions (Tranche 2.A). The mock toggles the aggregate in place so the
+  // pill row + strip work fully offline — the project's primary dev flow per
+  // CLAUDE.md §3. `reactedByMe` doubles as "this device reacted" since the
+  // mock has a single local user.
+  async addReaction(messageId, emoji) {
+    await sleep();
+    mutateReaction(messageId, emoji, true);
+  },
+
+  async removeReaction(messageId, emoji) {
+    await sleep();
+    mutateReaction(messageId, emoji, false);
   },
 
   async markThreadRead(threadId) {
