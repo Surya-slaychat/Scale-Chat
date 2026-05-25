@@ -1,4 +1,5 @@
 export * from './auth.js';
+export * from './chat-filters.js';
 export * from './chats.js';
 export * from './common.js';
 export * from './contacts.js';

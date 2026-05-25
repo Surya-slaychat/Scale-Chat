@@ -21,6 +21,10 @@ export const StorageKeys = {
   chatSnapshot: 'chat.snapshot.v2',
   /** Per-thread last-seen sequence — mirrors the eventual socket session resume. */
   chatLastSequencePrefix: 'chat.lastSequence.',
+  /** Manual theme override layered on top of useColorScheme(): 'system' | 'light' | 'dark'. */
+  themeMode: 'app.themeMode.v1',
+  /** Local cache of /chats/filters so the filter menu paints without a network round-trip. */
+  chatFiltersCache: 'chat.filters.cache.v1',
 } as const;
 
 export function setJson<T>(key: string, value: T): void {

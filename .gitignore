@@ -1,5 +1,6 @@
 node_modules
 .tmp
+.tmp-screens
 *.log
 .DS_Store
 .env
@@ -8,6 +9,11 @@ dist
 *.tsbuildinfo
 coverage
 .idea/workspace.xml
+
+# Local dev secrets — keys/PEMs must never be checked in. Generate per-machine
+# with `openssl genpkey -algorithm RSA -out jwt-private.pem -pkeyopt rsa_keygen_bits:2048`.
+*.pem
+*.key
 
 # Workspace-managed lockfile lives at the root; nested ones are an error.
 my-app/package-lock.json

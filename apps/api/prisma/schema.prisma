@@ -39,6 +39,7 @@ model User {
   chatMemberships ChatMember[]
   sentMessages    Message[]      @relation("MessageSender")
   createdChats    Chat[]         @relation("ChatCreator")
+  chatFilters     UserChatFilter[]
 
   @@index([phoneE164])
   @@map("users")
@@ -281,4 +282,28 @@ enum MessageKind {
   VOICE
   IMAGE
   SYSTEM
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User-defined custom chat filter ("Add" chip in the Contact Page Filter menu).
+//
+// `criteria` is a JSON blob validated server-side against the zod schema
+// `ChatFilterCriteriaSchema` (packages/shared/src/schemas/chat-filters.ts).
+// Server folds it into the chat list `where` so pagination cursors stay valid;
+// client only sends `customFilterId=<uuid>` on the read path.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model UserChatFilter {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  /// User-given name shown as the chip label. ≤60 chars (matches contacts.displayName cap).
+  name      String   @db.VarChar(60)
+  /// { kinds?: ChatKind[], unread?: boolean, favourite?: boolean, archived?: boolean, mutedExcluded?: boolean }
+  criteria  Json
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_chat_filters")
 }

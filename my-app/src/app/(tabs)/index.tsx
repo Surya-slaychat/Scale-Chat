@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useMemo, useReducer, useRef, useState } from 'react';
+import { FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -11,13 +11,44 @@ import { ChatRow } from '@/features/chat/components/chat-row';
 import { ChatsMoreMenu } from '@/features/chat/components/chats-more-menu';
 import { FilterMenu } from '@/features/chat/components/filter-menu';
 import { NewChatMenu } from '@/features/chat/components/new-chat-menu';
+import { SelectModeBar } from '@/features/chat/components/select-mode-bar';
 import { ChatCopy } from '@/features/chat/copy';
 import { chatRepository } from '@/features/chat/data';
+import { useBulkChatActions } from '@/features/chat/hooks/use-bulk-chat-actions';
+import { useChatFilters } from '@/features/chat/hooks/use-chat-filters';
 import { useThreads } from '@/features/chat/hooks/use-threads';
 import { ChatFilters, type ChatFilter } from '@/features/chat/types';
 import { StatusRow } from '@/features/stories/components/status-row';
 import { useAuth } from '@/features/auth/hooks/use-auth';
 import { useTheme } from '@/hooks/use-theme';
+import { useThemeMode } from '@/hooks/use-theme-mode';
+
+type SelectState = { mode: 'browse' | 'select'; ids: ReadonlySet<string> };
+type SelectAction =
+  | { type: 'enter'; id?: string }
+  | { type: 'toggle'; id: string }
+  | { type: 'clear' }
+  | { type: 'exit' };
+
+function selectReducer(state: SelectState, action: SelectAction): SelectState {
+  switch (action.type) {
+    case 'enter': {
+      const ids = new Set(state.ids);
+      if (action.id) ids.add(action.id);
+      return { mode: 'select', ids };
+    }
+    case 'toggle': {
+      const ids = new Set(state.ids);
+      if (ids.has(action.id)) ids.delete(action.id);
+      else ids.add(action.id);
+      return { mode: 'select', ids };
+    }
+    case 'clear':
+      return { mode: 'select', ids: new Set() };
+    case 'exit':
+      return { mode: 'browse', ids: new Set() };
+  }
+}
 
 /**
  * Contact Page — Figma "Contact Page" frame (1on1 default + 3-dot / + / filter
@@ -27,11 +58,18 @@ import { useTheme } from '@/hooks/use-theme';
 export default function ChatsScreen() {
   const router = useRouter();
   const theme = useTheme();
+  const { mode: themeMode, cycle: cycleThemeMode } = useThemeMode();
   const { currentUser } = useAuth();
-  const { threads, loading } = useThreads();
-
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ChatFilter>('all');
+  /** When set, custom filter overrides preset. id matches one in useChatFilters().filters. */
+  const [activeCustomFilterId, setActiveCustomFilterId] = useState<string | null>(null);
+  const { filters: customFilters } = useChatFilters();
+  const activeCustom = activeCustomFilterId
+    ? customFilters.find((f) => f.id === activeCustomFilterId) ?? null
+    : null;
+
+  const { threads, loading } = useThreads({ customFilterId: activeCustomFilterId });
 
   const moreAnchorRef = useRef<View>(null);
   const plusAnchorRef = useRef<View>(null);
@@ -39,6 +77,25 @@ export default function ChatsScreen() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+
+  const [select, dispatch] = useReducer(selectReducer, {
+    mode: 'browse',
+    ids: new Set<string>(),
+  });
+  const [busy, setBusy] = useState(false);
+  const bulk = useBulkChatActions(select.ids);
+  const inSelectMode = select.mode === 'select';
+
+  async function runBulk(action: () => Promise<void>) {
+    if (busy || select.ids.size === 0) return;
+    setBusy(true);
+    try {
+      await action();
+      dispatch({ type: 'exit' });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const firstName = currentUser?.fullName?.split(' ')[0] ?? '';
   const greeting = firstName ? ChatCopy.list.greeting(firstName) : ChatCopy.list.greetingFallback;
@@ -58,14 +115,40 @@ export default function ChatsScreen() {
     <ThemedView style={styles.root}>
       <View style={[styles.headerCard, { backgroundColor: theme.headerCard }]}>
         <SafeAreaView edges={['top']}>
+          {inSelectMode ? (
+            <SelectModeBar
+              count={select.ids.size}
+              onCancel={() => dispatch({ type: 'exit' })}
+              onMarkRead={() => runBulk(bulk.bulkMarkRead)}
+              onFavourite={() => runBulk(bulk.bulkFavourite)}
+              onArchive={() => runBulk(bulk.bulkArchive)}
+              busy={busy}
+            />
+          ) : null}
+          {!inSelectMode ? (
           <View style={styles.greetingRow}>
             <ThemedText style={[styles.greeting, { color: theme.headerCardText }]}>
               {greeting}
             </ThemedText>
             <View style={styles.headerIcons}>
-              <View style={[styles.toggle, { backgroundColor: theme.headerCardIconBg }]}>
-                <View style={[styles.toggleKnob, { backgroundColor: theme.headerCardText }]} />
-              </View>
+              <Pressable
+                onPress={cycleThemeMode}
+                accessibilityRole="switch"
+                accessibilityLabel={`Theme mode: ${themeMode}. Tap to change.`}
+                style={({ pressed }) => [
+                  styles.toggle,
+                  { backgroundColor: theme.headerCardIconBg },
+                  pressed && { opacity: 0.75 },
+                ]}>
+                <View
+                  style={[
+                    styles.toggleKnob,
+                    { backgroundColor: theme.headerCardText },
+                    themeMode === 'system' && styles.toggleKnobCenter,
+                    themeMode === 'light' && styles.toggleKnobLeft,
+                  ]}
+                />
+              </Pressable>
               <Pressable
                 ref={plusAnchorRef}
                 onPress={() => setPlusOpen(true)}
@@ -90,7 +173,8 @@ export default function ChatsScreen() {
               </Pressable>
             </View>
           </View>
-
+          ) : null}
+          {!inSelectMode ? (
           <View style={styles.searchRow}>
             <View style={[styles.searchPill, { backgroundColor: theme.headerCardIconBg }]}>
               <TextInput
@@ -108,10 +192,12 @@ export default function ChatsScreen() {
               <Feather name="sliders" size={16} color={theme.headerCardText} />
             </Pressable>
           </View>
-
+          ) : null}
+          {!inSelectMode ? (
           <View style={styles.statusWrap}>
             <StatusRow onLightBackground />
           </View>
+          ) : null}
         </SafeAreaView>
       </View>
 
@@ -129,11 +215,16 @@ export default function ChatsScreen() {
           ]}>
           <Feather name="filter" size={14} color={theme.textSecondary} />
           <ThemedText style={[styles.filterLabel, { color: theme.text }]}>
-            {filter === 'all' ? ChatCopy.list.filter : ChatFilters[filter]}
+            {activeCustom
+              ? activeCustom.name
+              : filter === 'all'
+              ? ChatCopy.list.filter
+              : ChatFilters[filter]}
           </ThemedText>
           <Feather name="chevron-down" size={14} color={theme.textSecondary} />
         </Pressable>
         <Pressable
+          onPress={() => router.push('/edit-filters')}
           accessibilityLabel="Edit filters"
           style={[styles.filterTrash, { backgroundColor: theme.surfaceMuted }]}>
           <Feather name="edit-2" size={14} color={theme.textSecondary} />
@@ -146,7 +237,15 @@ export default function ChatsScreen() {
         renderItem={({ item }) => (
           <ChatRow
             thread={item}
-            onPress={(t) => router.push({ pathname: '/chat/[id]', params: { id: t.id } })}
+            selected={inSelectMode ? select.ids.has(item.id) : undefined}
+            onPress={(t) => {
+              if (inSelectMode) {
+                dispatch({ type: 'toggle', id: t.id });
+              } else {
+                router.push({ pathname: '/chat/[id]', params: { id: t.id } });
+              }
+            }}
+            onLongPress={(t) => dispatch({ type: 'enter', id: t.id })}
           />
         )}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.one }} />}
@@ -170,7 +269,7 @@ export default function ChatsScreen() {
         visible={moreOpen}
         onDismiss={() => setMoreOpen(false)}
         anchorRef={moreAnchorRef}
-        onSelectChats={() => Alert.alert('Select Chats', 'Multi-select mode lands in the next ticket.')}
+        onSelectChats={() => dispatch({ type: 'enter' })}
         onReadAll={() => {
           void chatRepository.markAllRead();
         }}
@@ -182,9 +281,15 @@ export default function ChatsScreen() {
         visible={filterOpen}
         onDismiss={() => setFilterOpen(false)}
         anchorRef={filterAnchorRef}
-        active={filter}
-        onSelect={(next) => setFilter(next)}
-        onAddCustom={() => Alert.alert(ChatCopy.list.addFilterTitle, ChatCopy.list.addFilterBody)}
+        active={activeCustom ? null : filter}
+        customFilters={customFilters}
+        activeCustomId={activeCustomFilterId}
+        onSelect={(next) => {
+          setActiveCustomFilterId(null);
+          setFilter(next);
+        }}
+        onSelectCustom={(id) => setActiveCustomFilterId(id)}
+        onAddCustom={() => router.push('/edit-filters')}
       />
     </ThemedView>
   );
@@ -244,6 +349,12 @@ const styles = StyleSheet.create({
     height: 14,
     borderRadius: 7,
     alignSelf: 'flex-end',
+  },
+  toggleKnobCenter: {
+    alignSelf: 'center',
+  },
+  toggleKnobLeft: {
+    alignSelf: 'flex-start',
   },
   iconBtn: {
     width: 32,

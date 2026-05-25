@@ -4,12 +4,19 @@ import type {
   UpdateContactBody,
 } from '@scalechat/shared';
 
+export type ContactsListArgs = {
+  cursor?: string;
+  limit?: number;
+  /** Trimmed free-text predicate matched against displayName + phoneE164. */
+  search?: string;
+};
+
 /**
  * Seam for the eventual `/contacts` REST endpoints. Mocked in dev with
  * `EXPO_PUBLIC_USE_MOCKS=true`; otherwise served by `api-contacts-repository`.
  */
 export interface ContactsRepository {
-  list(cursor?: string): Promise<{ items: Contact[]; nextCursor: string | null }>;
+  list(args?: ContactsListArgs): Promise<{ items: Contact[]; nextCursor: string | null }>;
   add(body: AddContactBody): Promise<Contact>;
   update(id: string, body: UpdateContactBody): Promise<Contact>;
   remove(id: string): Promise<void>;

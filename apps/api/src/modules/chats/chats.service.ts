@@ -1,19 +1,24 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { ChatKind, Prisma } from '@prisma/client';
-import type {
-  ChatFilter,
-  ChatListItem,
-  ChatListResponse,
-  CreateGroupBody,
-  CreateOneOnOneBody,
-  CreateSuperGroupBody,
-  MarkReadBody,
+import {
+  ChatFilterCriteriaSchema,
+  brandAsMasked,
+  type ChatFilter,
+  type ChatFilterCriteria,
+  type ChatFilterRow,
+  type ChatListItem,
+  type ChatListResponse,
+  type CreateChatFilterBody,
+  type CreateGroupBody,
+  type CreateOneOnOneBody,
+  type CreateSuperGroupBody,
+  type MarkReadBody,
 } from '@scalechat/shared';
-import { brandAsMasked } from '@scalechat/shared';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { buildPage, decodeCursor, encodeCursor } from '../../common/pagination/cursor';
@@ -67,23 +72,62 @@ export class ChatsService {
     userId: string,
     cursor: string | undefined,
     limit: number,
-    filter: ChatFilter
+    filter: ChatFilter,
+    customFilterId?: string,
   ): Promise<ChatListResponse> {
     const c = decodeCursor(cursor, isChatCursor);
 
+    // When a custom filter is selected, load + ownership-check + parse it. The
+    // preset `filter` arg is ignored. Custom criteria is folded into the same
+    // chat/memberWhere construction below so pagination cursors remain valid.
+    let criteria: ChatFilterCriteria | undefined;
+    let postQueryUnread = filter === 'UNREAD';
+    if (customFilterId) {
+      const row = await this.prisma.userChatFilter.findFirst({
+        where: { id: customFilterId, userId },
+      });
+      if (!row) {
+        throw new NotFoundException({ code: 'filter_not_found', message: 'Filter not found.' });
+      }
+      const parsed = ChatFilterCriteriaSchema.safeParse(row.criteria);
+      if (!parsed.success) {
+        throw new BadRequestException({
+          code: 'filter_corrupt',
+          message: 'Stored filter criteria failed validation. Recreate the filter.',
+        });
+      }
+      criteria = parsed.data;
+      postQueryUnread = criteria.unread === true;
+    }
+
+    // Build chat-level (kind) predicates from preset OR custom kinds.
     let chatWhere: Prisma.ChatWhereInput | undefined;
-    if (filter === 'GROUP') {
+    if (criteria?.kinds && criteria.kinds.length > 0) {
+      chatWhere = { kind: { in: criteria.kinds as ChatKind[] } };
+    } else if (filter === 'GROUP') {
       chatWhere = { kind: { in: [ChatKind.GROUP, ChatKind.SUPER_GROUP] } };
     } else if (filter === 'SUPER_GROUP') {
       chatWhere = { kind: ChatKind.SUPER_GROUP };
     }
 
+    // Member-level (favourite/archive/muted) predicates. Custom criteria wins
+    // when present; preset semantics applies otherwise.
     const memberWhere: Prisma.ChatMemberWhereInput = {
       userId,
       leftAt: null,
       ...(chatWhere ? { chat: chatWhere } : {}),
-      ...(filter === 'FAVOURITES' ? { favouriteAt: { not: null } } : {}),
-      ...(filter === 'UNREAD' ? { archivedAt: null } : {}),
+      ...(criteria
+        ? {
+            ...(criteria.favourite === true ? { favouriteAt: { not: null } } : {}),
+            ...(criteria.favourite === false ? { favouriteAt: null } : {}),
+            ...(criteria.archived === true ? { archivedAt: { not: null } } : {}),
+            ...(criteria.archived === false ? { archivedAt: null } : {}),
+            ...(criteria.mutedExcluded === true ? { mutedUntil: null } : {}),
+          }
+        : {
+            ...(filter === 'FAVOURITES' ? { favouriteAt: { not: null } } : {}),
+            ...(filter === 'UNREAD' ? { archivedAt: null } : {}),
+          }),
     };
 
     const members = await this.prisma.chatMember.findMany({
@@ -117,7 +161,7 @@ export class ChatsService {
 
         // Server-side UNREAD filter is post-query because the unread *count* is computed
         // here (Prisma can't express `lastMessage.sequence > member.lastReadSequence`).
-        if (filter === 'UNREAD' && unread === 0) return null;
+        if (postQueryUnread && unread === 0) return null;
 
         const counterpart = chat.kind === 'ONE_ON_ONE' ? chat.members[0]?.user ?? null : null;
         const title =
@@ -371,5 +415,93 @@ export class ChatsService {
       data: { archivedAt: next },
     });
     return { isArchived: next !== null };
+  }
+
+  /**
+   * Idempotent setter — bulk multi-select fan-outs hit this so spam-tapping
+   * doesn't flip state. Sister to `toggleFavourite`, which the per-chat header
+   * still uses. NOP when the value already matches.
+   */
+  async setFavourite(
+    userId: string,
+    chatId: string,
+    value: boolean,
+  ): Promise<{ isFavourite: boolean }> {
+    const member = await this.prisma.chatMember.findUnique({
+      where: { chatId_userId: { chatId, userId } },
+    });
+    if (!member) {
+      throw new NotFoundException({ code: 'chat_not_found', message: 'Chat not found.' });
+    }
+    const currentlyFav = member.favouriteAt !== null;
+    if (currentlyFav === value) return { isFavourite: value };
+    await this.prisma.chatMember.update({
+      where: { id: member.id },
+      data: { favouriteAt: value ? new Date() : null },
+    });
+    return { isFavourite: value };
+  }
+
+  async setArchive(
+    userId: string,
+    chatId: string,
+    value: boolean,
+  ): Promise<{ isArchived: boolean }> {
+    const member = await this.prisma.chatMember.findUnique({
+      where: { chatId_userId: { chatId, userId } },
+    });
+    if (!member) {
+      throw new NotFoundException({ code: 'chat_not_found', message: 'Chat not found.' });
+    }
+    const currentlyArchived = member.archivedAt !== null;
+    if (currentlyArchived === value) return { isArchived: value };
+    await this.prisma.chatMember.update({
+      where: { id: member.id },
+      data: { archivedAt: value ? new Date() : null },
+    });
+    return { isArchived: value };
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // User-defined custom filters (Contact Page "Add" chip)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  async listFilters(userId: string): Promise<{ items: ChatFilterRow[] }> {
+    const rows = await this.prisma.userChatFilter.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
+    });
+    const items: ChatFilterRow[] = rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      criteria: ChatFilterCriteriaSchema.parse(r.criteria),
+      createdAt: r.createdAt.toISOString(),
+    }));
+    return { items };
+  }
+
+  async createFilter(userId: string, body: CreateChatFilterBody): Promise<ChatFilterRow> {
+    const row = await this.prisma.userChatFilter.create({
+      data: {
+        userId,
+        name: body.name,
+        criteria: body.criteria as Prisma.InputJsonValue,
+      },
+    });
+    return {
+      id: row.id,
+      name: row.name,
+      criteria: ChatFilterCriteriaSchema.parse(row.criteria),
+      createdAt: row.createdAt.toISOString(),
+    };
+  }
+
+  async deleteFilter(userId: string, filterId: string): Promise<void> {
+    const result = await this.prisma.userChatFilter.deleteMany({
+      where: { id: filterId, userId },
+    });
+    if (result.count === 0) {
+      throw new NotFoundException({ code: 'filter_not_found', message: 'Filter not found.' });
+    }
   }
 }

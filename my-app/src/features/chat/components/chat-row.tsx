@@ -12,25 +12,45 @@ import { Avatar } from './avatar';
 type Props = {
   thread: Thread;
   onPress: (thread: Thread) => void;
+  /** Long-press is the canonical "enter select mode" gesture from the BRD. */
+  onLongPress?: (thread: Thread) => void;
+  /** When defined the row renders a leading checkbox (selection mode). */
+  selected?: boolean;
 };
 
 /** Single chat row in the chat-list — Figma 1:2390 / 1:2574. */
-export function ChatRow({ thread, onPress }: Props) {
+export function ChatRow({ thread, onPress, onLongPress, selected }: Props) {
   const theme = useTheme();
   const preview = previewText(thread);
   const isVoice = thread.lastMessage.type === 'voice';
   const isMine = thread.lastMessage.senderId === 'me';
   const showDoubleTick = isMine && thread.lastMessage.status === 'read';
   const showSingleTick = isMine && thread.lastMessage.status === 'delivered';
+  const inSelectMode = selected !== undefined;
 
   return (
     <Pressable
       onPress={() => onPress(thread)}
+      onLongPress={onLongPress ? () => onLongPress(thread) : undefined}
+      delayLongPress={300}
       style={({ pressed }) => [
         styles.row,
         { backgroundColor: theme.surfaceMuted },
         pressed && { opacity: 0.85 },
+        selected && { backgroundColor: theme.surfaceInput },
       ]}>
+      {inSelectMode ? (
+        <View
+          style={[
+            styles.checkbox,
+            {
+              borderColor: selected ? Brand.accent : theme.textSecondary,
+              backgroundColor: selected ? Brand.accent : 'transparent',
+            },
+          ]}>
+          {selected ? <Feather name="check" size={14} color={Brand.accentText} /> : null}
+        </View>
+      ) : null}
       <Avatar contact={thread.counterpart} size={48} />
 
       <View style={styles.middle}>
@@ -148,5 +168,13 @@ const styles = StyleSheet.create({
   tickGroup: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

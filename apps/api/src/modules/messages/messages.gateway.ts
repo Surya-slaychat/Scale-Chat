@@ -114,7 +114,7 @@ export class MessagesGateway
   async handleConnection(@ConnectedSocket() socket: Socket): Promise<void> {
     const token = extractToken(socket);
     if (!token) {
-      socket.emit('connect_error', { code: 'missing_token', message: 'No access token in handshake' });
+      socket.emit('chat:auth_error', { code: 'missing_token', message: 'No access token in handshake' });
       socket.disconnect(true);
       return;
     }
@@ -122,7 +122,7 @@ export class MessagesGateway
     try {
       claims = this.jwt.verifyAccessToken(token);
     } catch {
-      socket.emit('connect_error', { code: 'invalid_token', message: 'Access token rejected' });
+      socket.emit('chat:auth_error', { code: 'invalid_token', message: 'Access token rejected' });
       socket.disconnect(true);
       return;
     }

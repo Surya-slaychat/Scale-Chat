@@ -62,6 +62,9 @@ function nextSequence(threadId: string): number {
 }
 
 export const mockChatRepository: ChatRepository = {
+  // Mock ignores customFilterId — custom filters require real backend persistence
+  // and aren't useful against an in-memory seed. The arg is accepted to keep the
+  // interface contract identical to the API impl.
   async listThreads() {
     await sleep();
     // Most-recent first.

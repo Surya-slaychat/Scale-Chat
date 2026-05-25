@@ -37,9 +37,17 @@ function uuid(): string {
 }
 
 export const mockContactsRepository: ContactsRepository = {
-  async list() {
+  async list(args) {
     await sleep();
-    return { items: [...cache], nextCursor: null };
+    const search = args?.search?.toLowerCase();
+    const items = search
+      ? cache.filter(
+          (c) =>
+            c.displayName.toLowerCase().includes(search) ||
+            c.phoneE164.toLowerCase().includes(search),
+        )
+      : [...cache];
+    return { items, nextCursor: null };
   },
 
   async add(body: AddContactBody) {

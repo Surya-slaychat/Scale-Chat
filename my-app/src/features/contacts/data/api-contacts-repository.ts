@@ -15,9 +15,13 @@ function notify(): void {
 }
 
 export const apiContactsRepository: ContactsRepository = {
-  async list(cursor) {
-    const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-    const res = await apiClient.get<ContactsListResponse>(`/contacts${qs}`);
+  async list(args) {
+    const params = new URLSearchParams();
+    if (args?.cursor) params.set('cursor', args.cursor);
+    if (args?.limit !== undefined) params.set('limit', String(args.limit));
+    if (args?.search) params.set('search', args.search);
+    const qs = params.toString();
+    const res = await apiClient.get<ContactsListResponse>(`/contacts${qs ? `?${qs}` : ''}`);
     return { items: res.items, nextCursor: res.meta.nextCursor };
   },
   async add(body: AddContactBody) {

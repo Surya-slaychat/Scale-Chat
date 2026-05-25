@@ -52,6 +52,8 @@ export const ChatListQuerySchema = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(30),
   filter: ChatFilterEnum.optional().default('ALL'),
+  /** When set, the preset `filter` is ignored and the criteria from this stored row is applied. */
+  customFilterId: z.string().uuid().optional(),
 });
 export type ChatListQuery = z.infer<typeof ChatListQuerySchema>;
 
@@ -84,3 +86,14 @@ export const MarkReadSchema = z.object({
   uptoSequence: z.string().regex(/^\d+$/, 'sequence must be a numeric string (BigInt)'),
 });
 export type MarkReadBody = z.infer<typeof MarkReadSchema>;
+
+/**
+ * Idempotent setter body for PUT /chats/:id/favourite and /chats/:id/archive.
+ * Pairs with the existing PATCH toggles — the toggle stays for the per-chat
+ * header gesture; the PUT setter is used by bulk multi-select fan-outs so
+ * spam-tapping doesn't flip state.
+ */
+export const ChatBooleanSetterSchema = z.object({
+  value: z.boolean(),
+});
+export type ChatBooleanSetterBody = z.infer<typeof ChatBooleanSetterSchema>;

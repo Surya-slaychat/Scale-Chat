@@ -21,8 +21,13 @@ export type LoadOlderResult = {
  * responses and socket `message:new` events, so screens never need to refetch
  * to see an incoming message — they just `subscribe()` and re-read.
  */
+export type ListThreadsArgs = {
+  /** When set, the server applies the stored UserChatFilter.criteria instead of any preset. */
+  customFilterId?: string;
+};
+
 export interface ChatRepository {
-  listThreads(): Promise<Thread[]>;
+  listThreads(args?: ListThreadsArgs): Promise<Thread[]>;
   getThread(threadId: string): Promise<Thread | null>;
   listMessages(threadId: string): Promise<Message[]>;
   /** Fetch older messages (before the oldest one currently cached). */

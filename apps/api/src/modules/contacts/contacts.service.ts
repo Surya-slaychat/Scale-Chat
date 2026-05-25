@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import type {
   AddContactBody,
   Contact,
+  ContactsListQuery,
   ContactsListResponse,
   UpdateContactBody,
 } from '@scalechat/shared';
@@ -48,16 +49,25 @@ function toDto(row: ContactRow): Contact {
 export class ContactsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(
-    ownerUserId: string,
-    cursor: string | undefined,
-    limit: number
-  ): Promise<ContactsListResponse> {
+  async list(ownerUserId: string, query: ContactsListQuery): Promise<ContactsListResponse> {
+    const { cursor, limit, search } = query;
     const c = decodeCursor(cursor, isContactCursor);
+
+    // Search predicate: case-insensitive substring against displayName OR phone number.
+    // Both columns are already indexed by the unique `(ownerUserId, phoneE164)` and the
+    // implicit `displayName` btree on ordering — adequate for the Contact Page page sizes.
+    const searchWhere = search
+      ? {
+          OR: [
+            { displayName: { contains: search, mode: 'insensitive' as const } },
+            { phoneE164: { contains: search } },
+          ],
+        }
+      : {};
 
     // Two-tier sort: favourites first (NULLS LAST), then alphabetical by name, id as tie-breaker.
     const rows = await this.prisma.contact.findMany({
-      where: { ownerUserId },
+      where: { ownerUserId, ...searchWhere },
       orderBy: [{ favouriteAt: { sort: 'desc', nulls: 'last' } }, { displayName: 'asc' }, { id: 'asc' }],
       take: limit + 1,
       ...(c

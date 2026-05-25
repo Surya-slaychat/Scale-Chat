@@ -46,9 +46,12 @@ npm run shared:build
 
 ## Status snapshot
 
+> Per `my-app/CLAUDE.md` §7 working agreement, every behavior-changing commit must update this table AND the matching `docs/progress/<slice>.md` file in the same PR, or include `[skip-claudemd] <reason>` in the message. Self-learning loop — see `docs/progress/contact-page.md` for the canonical example.
+
 | Slice | Mobile | Backend | Notes |
 |---|---|---|---|
 | Welcome / Terms / Phone | ✅ | n/a | UI only |
+| Contact Page (chat list home) | ✅ live | ✅ live | Figma "Contact Page" frame (Base / 3-dot / Plus / Filter variants). Theme toggle, /new-chat → real /contacts, multi-select bulk actions, user-defined filters. See `docs/progress/contact-page.md`. |
 | OTP request | ✅ (mock) | ✅ | MSG91 + Redis + rate limit |
 | OTP verify | ✅ mock + real | ✅ argon2 + Redis | argon2-compares against Redis, attempts counter with lockout, burns key on success, mints JWT pair, marks `otp_requests` row VERIFIED |
 | Profile (`/me`) | ✅ (mock + real) | ✅ | JWT-guarded GET + PATCH |

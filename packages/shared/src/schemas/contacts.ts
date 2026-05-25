@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { paginatedResponse } from './common.js';
+import { CursorQuerySchema, paginatedResponse } from './common.js';
 
 const e164India = z
   .string()
@@ -49,3 +49,14 @@ export type UpdateContactBody = z.infer<typeof UpdateContactSchema>;
 
 export const ContactsListResponseSchema = paginatedResponse(ContactSchema);
 export type ContactsListResponse = z.infer<typeof ContactsListResponseSchema>;
+
+/**
+ * Cursor query extended with a free-text `search` predicate. The server matches
+ * against displayName (case-insensitive) and phoneE164 (substring). Trim+length
+ * cap mirrors the displayName max length so the index isn't fed pathological
+ * inputs.
+ */
+export const ContactsListQuerySchema = CursorQuerySchema.extend({
+  search: z.string().trim().min(1).max(60).optional(),
+});
+export type ContactsListQuery = z.infer<typeof ContactsListQuerySchema>;

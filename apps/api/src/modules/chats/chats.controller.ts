@@ -1,23 +1,31 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
 import {
+  ChatBooleanSetterSchema,
   ChatListQuerySchema,
+  CreateChatFilterSchema,
   CreateGroupSchema,
   CreateOneOnOneSchema,
   CreateSuperGroupSchema,
   MarkReadSchema,
+  type ChatBooleanSetterBody,
+  type ChatFilterRow,
+  type ChatFiltersListResponse,
   type ChatListQuery,
   type ChatListResponse,
+  type CreateChatFilterBody,
   type CreateGroupBody,
   type CreateOneOnOneBody,
   type CreateSuperGroupBody,
@@ -44,7 +52,35 @@ export class ChatsController {
     @CurrentUser() user: AccessTokenPayload,
     @Query(new ZodValidationPipe(ChatListQuerySchema)) query: ChatListQuery
   ): Promise<ChatListResponse> {
-    return this.chats.list(user.sub, query.cursor, query.limit, query.filter);
+    return this.chats.list(user.sub, query.cursor, query.limit, query.filter, query.customFilterId);
+  }
+
+  /**
+   * Custom filter CRUD. Mounted BEFORE the `:id/*` routes — NestJS matches in
+   * declaration order so `/chats/filters` must shadow the `:id` placeholder
+   * for "filters" not to be treated as a chat UUID. (NestJS would 400 on the
+   * UUID pipe anyway, but explicit ordering is clearer.)
+   */
+  @Get('filters')
+  listFilters(@CurrentUser() user: AccessTokenPayload): Promise<ChatFiltersListResponse> {
+    return this.chats.listFilters(user.sub);
+  }
+
+  @Post('filters')
+  createFilter(
+    @CurrentUser() user: AccessTokenPayload,
+    @Body(new ZodValidationPipe(CreateChatFilterSchema)) body: CreateChatFilterBody
+  ): Promise<ChatFilterRow> {
+    return this.chats.createFilter(user.sub, body);
+  }
+
+  @Delete('filters/:id')
+  @HttpCode(204)
+  async deleteFilter(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string
+  ): Promise<void> {
+    await this.chats.deleteFilter(user.sub, id);
   }
 
   @Post('one-on-one')
@@ -103,5 +139,28 @@ export class ChatsController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string
   ): Promise<{ isArchived: boolean }> {
     return this.chats.toggleArchive(user.sub, id);
+  }
+
+  /**
+   * Idempotent setters paired with the PATCH toggles above. Bulk multi-select
+   * fan-outs hit these so spam-taps don't flip state. The per-chat header
+   * gesture still uses the toggle endpoints — caller chooses the semantic.
+   */
+  @Put(':id/favourite')
+  setFavourite(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body(new ZodValidationPipe(ChatBooleanSetterSchema)) body: ChatBooleanSetterBody
+  ): Promise<{ isFavourite: boolean }> {
+    return this.chats.setFavourite(user.sub, id, body.value);
+  }
+
+  @Put(':id/archive')
+  setArchive(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body(new ZodValidationPipe(ChatBooleanSetterSchema)) body: ChatBooleanSetterBody
+  ): Promise<{ isArchived: boolean }> {
+    return this.chats.setArchive(user.sub, id, body.value);
   }
 }

@@ -3,11 +3,20 @@ import { useEffect, useState } from 'react';
 import { chatRepository } from '../data';
 import type { Thread } from '../types';
 
+type Args = {
+  /** Optional UserChatFilter id. When set, server applies its criteria. */
+  customFilterId?: string | null;
+};
+
 /**
  * React hook reflecting the live thread list from the active chat repository
  * (mock in dev, real API in prod — see `features/chat/data/index.ts`).
+ *
+ * `customFilterId` is passed through to the API repo's `?customFilterId=`
+ * query param. Changing it re-fetches.
  */
-export function useThreads(): { threads: Thread[]; loading: boolean } {
+export function useThreads(args: Args = {}): { threads: Thread[]; loading: boolean } {
+  const { customFilterId } = args;
   const [threads, setThreads] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -16,7 +25,9 @@ export function useThreads(): { threads: Thread[]; loading: boolean } {
 
     async function refresh() {
       try {
-        const next = await chatRepository.listThreads();
+        const next = await chatRepository.listThreads(
+          customFilterId ? { customFilterId } : undefined,
+        );
         if (!active) return;
         setThreads(next);
       } catch {
@@ -33,7 +44,7 @@ export function useThreads(): { threads: Thread[]; loading: boolean } {
       active = false;
       unsubscribe();
     };
-  }, []);
+  }, [customFilterId]);
 
   return { threads, loading };
 }

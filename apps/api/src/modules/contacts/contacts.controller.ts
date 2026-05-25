@@ -13,12 +13,12 @@ import {
 } from '@nestjs/common';
 import {
   AddContactSchema,
-  CursorQuerySchema,
+  ContactsListQuerySchema,
   UpdateContactSchema,
   type AddContactBody,
   type Contact,
+  type ContactsListQuery,
   type ContactsListResponse,
-  type CursorQuery,
   type UpdateContactBody,
 } from '@scalechat/shared';
 
@@ -36,9 +36,9 @@ export class ContactsController {
   @Get()
   list(
     @CurrentUser() user: AccessTokenPayload,
-    @Query(new ZodValidationPipe(CursorQuerySchema)) query: CursorQuery
+    @Query(new ZodValidationPipe(ContactsListQuerySchema)) query: ContactsListQuery
   ): Promise<ContactsListResponse> {
-    return this.contacts.list(user.sub, query.cursor, query.limit);
+    return this.contacts.list(user.sub, query);
   }
 
   @Post()

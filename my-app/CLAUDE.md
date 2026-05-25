@@ -200,6 +200,7 @@ Scalechat Pdf (2).pdf         # canonical pitch (project root)
 - When you don't have the design context, **fetch it via the Figma MCP** (`get_design_context`) — don't guess from text descriptions.
 - **Don't add features outside the current BRD** without updating the BRD first.
 - For every Expo module: **read the v56 docs first** (see §2).
+- **Self-learning doc loop (NEW — non-negotiable).** Every commit that ships user-visible behavior MUST update both the root [`CLAUDE.md`](../CLAUDE.md) §10 status snapshot AND the relevant `docs/progress/<slice>.md` file in the same PR. If a commit genuinely cannot — e.g. a pure refactor, lint pass, or build-fix that doesn't change behavior — the commit message must include `[skip-claudemd] <one-line reason>`. The rule applies to humans and Claude sessions alike. Rationale: the repo is the project's memory; without this rule, the BRD / status table / progress notes drift out of sync within a week and the next contributor (or next Claude run) has to re-discover everything from `git log`.
 
 ## 8. Useful commands
 

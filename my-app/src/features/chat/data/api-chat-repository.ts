@@ -332,9 +332,10 @@ const OLDER_PAGE_LIMIT = 50;
  * sends. Failure flips the row to `status: 'failed'` for retry.
  */
 export const apiChatRepository: ChatRepository = {
-  async listThreads() {
+  async listThreads(args) {
     ensureSocketWired();
-    const res = await apiClient.get<ChatListResponse>('/chats');
+    const qs = args?.customFilterId ? `?customFilterId=${args.customFilterId}` : '';
+    const res = await apiClient.get<ChatListResponse>(`/chats${qs}`);
     res.items.forEach((it) => {
       if (it.counterpart) counterpartByChatId.set(it.id, it.counterpart.id);
     });
