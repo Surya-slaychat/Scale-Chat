@@ -202,21 +202,34 @@ Scalechat Pdf (2).pdf         # canonical pitch (project root)
 - For every Expo module: **read the v56 docs first** (see §2).
 - **Self-learning doc loop (NEW — non-negotiable).** Every commit that ships user-visible behavior MUST update both the root [`CLAUDE.md`](../CLAUDE.md) §10 status snapshot AND the relevant `docs/progress/<slice>.md` file in the same PR. If a commit genuinely cannot — e.g. a pure refactor, lint pass, or build-fix that doesn't change behavior — the commit message must include `[skip-claudemd] <one-line reason>`. The rule applies to humans and Claude sessions alike. Rationale: the repo is the project's memory; without this rule, the BRD / status table / progress notes drift out of sync within a week and the next contributor (or next Claude run) has to re-discover everything from `git log`.
 
+## 7.5 Build pipeline
+
+- **Expo Go is deprecated for this project.** Several native modules in the dep tree (`react-native-mmkv`, `expo-audio`, `expo-image-picker`, `expo-contacts`, and upcoming `@100mslive/*` + `expo-notifications`) don't work in Expo Go. The canonical dev flow is a local Android dev-client build via `npm run dev:android`.
+- **Local development**: Windows + Android Studio emulator only. Full setup guide in [`instruction-to-run-the-app.md`](./instruction-to-run-the-app.md). Backend runs on **port 4000**; emulator reaches it via `http://10.0.2.2:4000` (set in `my-app/.env.local`).
+- **EAS Build / iOS**: NOT set up. Deferred to **Tranche 2.I** per [`../docs/progress/1-on-1-chat-expansion.md`](../docs/progress/1-on-1-chat-expansion.md). Apple Developer enrollment + EAS profiles + first remote build all land together with the calls slice (which needs real-device push wakeup testing that emulators don't reliably simulate).
+- **`my-app/android/` is gitignored** — Continuous Native Generation. The native folder is treated as a build artifact regenerated from `app.json` + plugins. **Never edit files inside `android/` directly**; instead add the plugin config to `app.json` and run `npm run prebuild:android`.
+- **When in doubt about a build error**: try `cd my-app && npm run prebuild:android` first (re-syncs native modules), then `npm run dev:start -- --clear` (clears Metro cache). If still broken, see the [Tranche 2.0 Knowledge base](../docs/progress/1-on-1-chat-expansion.md#knowledge-base-for-future-native-dep-tranches) (K1–K10) for known gotchas.
+
 ## 8. Useful commands
 
 From `my-app/`:
 
 ```bash
 npm install
-npm run start          # expo start (dev server + QR)
-npm run android        # open Android emulator/device
-npm run ios            # open iOS simulator/device
+npm run start          # expo start (legacy; prefer dev:start for the dev-client flow)
+npm run android        # open Android emulator/device (legacy alias for dev:android)
+npm run ios            # open iOS simulator/device (deferred to Tranche 2.I; needs Mac + EAS)
 npm run web            # open web build
 npm run lint           # expo lint
 npm run reset-project  # nuke starter and start fresh
+
+# Dev-client flow (preferred — see §7.5 Build pipeline)
+npm run dev:android      # build + install dev client on running emulator
+npm run dev:start        # launch Metro for an already-installed dev client
+npm run prebuild:android # regenerate android/ after a plugin or native-dep change
 ```
 
-EAS commands (build, update, submit) — see [`../docs/architecture/expo-skills.md`](../docs/architecture/expo-skills.md) §G.
+EAS commands (build, update, submit) — see [`../docs/architecture/expo-skills.md`](../docs/architecture/expo-skills.md) §G. Note: EAS is **not** set up today; landing it is part of Tranche 2.I per [`../docs/progress/1-on-1-chat-expansion.md`](../docs/progress/1-on-1-chat-expansion.md).
 
 ## 9. Key files index
 
