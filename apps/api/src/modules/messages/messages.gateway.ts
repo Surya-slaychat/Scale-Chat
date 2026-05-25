@@ -344,6 +344,22 @@ export class MessagesGateway
   emitMessageDeleted(payload: SocketMessageDeleted): void {
     this.server.to(roomFor(payload.chatId)).emit(SocketEvents.messageDeleted, payload);
   }
+
+  /**
+   * Broadcast a reaction add/remove (Phase 2.1). Re-uses the chat room so
+   * every member with an open socket sees the aggregate update.
+   */
+  emitReactionUpdated(payload: {
+    chatId: string;
+    messageId: string;
+    reactions: Array<{ emoji: string; count: number; reactedByMe: boolean }>;
+  }): void {
+    this.server.to(roomFor(payload.chatId)).emit(SocketEvents.reactionUpdated, {
+      chatId: payload.chatId,
+      messageId: payload.messageId,
+      reactions: payload.reactions,
+    });
+  }
 }
 
 function roomFor(chatId: string): string {

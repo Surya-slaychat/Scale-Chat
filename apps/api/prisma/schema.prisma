@@ -40,6 +40,11 @@ model User {
   sentMessages    Message[]      @relation("MessageSender")
   createdChats    Chat[]         @relation("ChatCreator")
   chatFilters     UserChatFilter[]
+  reportsFiled    MessageReport[] @relation("ReporterUser")
+  blocksMade      BlockedUser[]  @relation("BlockerUser")
+  blockedBy       BlockedUser[]  @relation("BlockedTargetUser")
+  starredMessages StarredMessage[] @relation("UserStarredMessages")
+  messageReactions MessageReaction[] @relation("UserReactions")
 
   @@index([phoneE164])
   @@map("users")
@@ -227,6 +232,10 @@ model ChatMember {
   pinnedAt             DateTime?  @db.Timestamptz(6)
   archivedAt           DateTime?  @db.Timestamptz(6)
   favouriteAt          DateTime?  @db.Timestamptz(6)
+  /// Per-user "Clear chat" cutoff. Messages with createdAt <= clearedAt are
+  /// hidden from THIS user's list view while remaining visible to peers.
+  /// Counterpart's history is unaffected — matches WhatsApp behavior.
+  clearedAt            DateTime?  @db.Timestamptz(6)
   /// BigInt sequence the member has read up to, drives unread counts.
   lastReadSequence     BigInt     @default(0)
 
@@ -270,6 +279,9 @@ model Message {
   replyTo           Message?     @relation("MessageReply", fields: [replyToMessageId], references: [id], onDelete: SetNull)
   replies           Message[]    @relation("MessageReply")
   chatLastForChat   Chat[]       @relation("ChatLastMessage")
+  reports           MessageReport[] @relation("ReportedMessage")
+  stars             StarredMessage[] @relation("MessageStars")
+  reactions         MessageReaction[] @relation("MessageReactions")
 
   @@unique([senderUserId, clientMessageId])
   @@unique([chatId, sequence])
@@ -306,4 +318,135 @@ model UserChatFilter {
 
   @@index([userId])
   @@map("user_chat_filters")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-message moderation report.
+//
+// A reporter (the reader of a counterpart's bubble) submits a reason; the row
+// lives server-side only and is never broadcast. A user can re-report the
+// same message with a different reason but cannot duplicate the same (reason)
+// — the unique constraint stops repeated taps from spamming the queue.
+//
+// Privacy: this table is the only place where one user's id is paired with
+// another's *message body* outside the normal chat stream. The privacy
+// interceptor must keep it out of any non-admin DTO surface (admins-only
+// console / moderation tooling).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model MessageReport {
+  id              String          @id @default(uuid()) @db.Uuid
+  messageId       String          @db.Uuid
+  reporterUserId  String          @db.Uuid
+  reason          ReportReason
+  /// Optional free-form note (≤500 chars) — useful for the "Other" reason.
+  note            String?         @db.VarChar(500)
+  status          ReportStatus    @default(OPEN)
+  createdAt       DateTime        @default(now()) @db.Timestamptz(6)
+  resolvedAt      DateTime?       @db.Timestamptz(6)
+
+  message         Message         @relation("ReportedMessage", fields: [messageId], references: [id], onDelete: Cascade)
+  reporter        User            @relation("ReporterUser", fields: [reporterUserId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, reporterUserId, reason])
+  @@index([status, createdAt])
+  @@map("message_reports")
+}
+
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  INAPPROPRIATE_CONTENT
+  IMPERSONATION
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWED
+  ACTIONED
+  DISMISSED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-user block list.
+//
+// One row per (blocker → blocked) direction. Blocking is one-way at the
+// database level but enforced symmetrically at the message layer — if either
+// party has blocked the other, sends and broadcasts between them are dropped.
+//
+// Privacy: a blocked sender's existing messages remain in the recipient's
+// history (matches WhatsApp); new sends fail at the server and the gateway
+// doesn't broadcast `message:new` to the blocker. Chat list rows continue to
+// appear with a "Blocked" label so the user can unblock from the same surface.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model BlockedUser {
+  blockerUserId String   @db.Uuid
+  blockedUserId String   @db.Uuid
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  blocker       User     @relation("BlockerUser", fields: [blockerUserId], references: [id], onDelete: Cascade)
+  blocked       User     @relation("BlockedTargetUser", fields: [blockedUserId], references: [id], onDelete: Cascade)
+
+  @@id([blockerUserId, blockedUserId])
+  @@index([blockedUserId])
+  @@map("blocked_users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Starred messages (Phase D.3) — per-user bookmark on a single message.
+//
+// `(userId, messageId)` is unique (a user starring the same message twice is
+// idempotent). `chatId` is denormalised so the `GET /me/starred` listing can
+// page by `(userId, starredAt DESC)` without joining the message row twice.
+//
+// Tombstoned messages (deletedAt != null) stay in the star list with their
+// content zeroed — clients render the standard "This message was deleted"
+// placeholder. Server doesn't auto-unstar on delete so the bookmark survives
+// even if the sender retracts; this matches WhatsApp's behaviour.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model StarredMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  messageId String   @db.Uuid
+  chatId    String   @db.Uuid
+  starredAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user      User     @relation("UserStarredMessages", fields: [userId], references: [id], onDelete: Cascade)
+  message   Message  @relation("MessageStars", fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+  @@index([userId, starredAt])
+  @@index([chatId])
+  @@map("starred_messages")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Message reactions (Phase 2.1) — emoji reactions on a message.
+//
+// A user can react to a message with multiple distinct emojis but not the
+// same emoji twice — `(messageId, userId, emoji)` is unique. Server-side we
+// aggregate per emoji on read: `{ emoji, count, reactedByMe }[]`.
+//
+// `emoji` is stored as a short utf8 string (≤ 16 bytes covers multi-codepoint
+// emojis with skin tones / ZWJ sequences). The Prisma layer doesn't enforce
+// the emoji-ness — that validation lives in the zod schema in
+// `packages/shared`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model MessageReaction {
+  id        String   @id @default(uuid()) @db.Uuid
+  messageId String   @db.Uuid
+  userId    String   @db.Uuid
+  emoji     String   @db.VarChar(16)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  message   Message  @relation("MessageReactions", fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation("UserReactions", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+  @@map("message_reactions")
 }

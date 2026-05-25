@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { MessageKind, Prisma } from '@prisma/client';
 import type {
   ChatDetailDto,
+  ChatMediaListQuery,
   MediaUploadKind,
   MessageDeleteScope,
   MessageDto,
@@ -11,6 +12,7 @@ import type {
 
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { buildPage, decodeCursor, encodeCursor } from '../../common/pagination/cursor';
+import { BlocksService } from '../blocks/blocks.service';
 import { MediaService } from '../media/media.service';
 
 type MessageCursor = { createdAt: string; id: string };
@@ -60,6 +62,11 @@ function buildRowToDto(media: MediaService) {
       replyToMessageId: m.replyToMessageId,
       createdAt: m.createdAt.toISOString(),
       deletedAt: m.deletedAt ? m.deletedAt.toISOString() : null,
+      // Reactions default to empty here so the wire shape matches the zod
+      // schema without forcing every read path to join. Hot paths that care
+      // (e.g. `GET /chats/:id/messages`) load reactions in a batched query
+      // and call `injectReactions(dtos, aggregates)` to fold them in.
+      reactions: [],
     };
   };
 }
@@ -70,6 +77,7 @@ export class MessagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly media: MediaService,
+    private readonly blocks: BlocksService,
   ) {
     this.rowToDto = buildRowToDto(media);
   }
@@ -88,6 +96,28 @@ export class MessagesService {
     }
   }
 
+  /**
+   * Like `assertMember` but also returns the caller's per-membership state —
+   * used by `list` / `listMedia` to filter cleared messages, and by `send` to
+   * skip block-checks on group chats.
+   */
+  private async loadMemberOrThrow(
+    userId: string,
+    chatId: string,
+  ): Promise<{ id: string; clearedAt: Date | null }> {
+    const member = await this.prisma.chatMember.findUnique({
+      where: { chatId_userId: { chatId, userId } },
+      select: { id: true, leftAt: true, clearedAt: true },
+    });
+    if (!member || member.leftAt !== null) {
+      throw new ForbiddenException({
+        code: 'not_a_member',
+        message: 'You are not a member of this chat.',
+      });
+    }
+    return { id: member.id, clearedAt: member.clearedAt };
+  }
+
   async getChat(userId: string, chatId: string): Promise<ChatDetailDto> {
     const member = await this.prisma.chatMember.findUnique({
       where: { chatId_userId: { chatId, userId } },
@@ -96,6 +126,10 @@ export class MessagesService {
           include: {
             members: {
               where: { userId: { not: userId }, leftAt: null },
+              // Pull the counterpart's lastReadSequence in the same query so
+              // the client can flip already-read mine-bubbles to lime double-
+              // tick on initial mount (cold-start read receipts — Phase A
+              // Known-Limit #1, 2026-05-25 verify follow-up).
               include: {
                 user: { select: { id: true, fullName: true, avatarUri: true, phoneE164: true } },
               },
@@ -110,7 +144,8 @@ export class MessagesService {
     }
 
     const chat = member.chat;
-    const counterpart = chat.kind === 'ONE_ON_ONE' ? chat.members[0]?.user ?? null : null;
+    const counterpartMember = chat.kind === 'ONE_ON_ONE' ? chat.members[0] ?? null : null;
+    const counterpart = counterpartMember?.user ?? null;
     const title =
       chat.kind === 'ONE_ON_ONE'
         ? counterpart?.fullName ?? 'Direct chat'
@@ -132,6 +167,8 @@ export class MessagesService {
           }
         : null,
       lastReadSequence: member.lastReadSequence.toString(),
+      counterpartLastReadSequence:
+        counterpartMember?.lastReadSequence.toString() ?? null,
     };
   }
 
@@ -142,15 +179,22 @@ export class MessagesService {
     limit: number,
     direction: 'asc' | 'desc' = 'desc'
   ): Promise<MessageListResponse> {
-    await this.assertMember(userId, chatId);
+    const member = await this.loadMemberOrThrow(userId, chatId);
 
     const c = decodeCursor(cursor, isMessageCursor);
+
+    // Per-user "Clear chat" cutoff — messages at-or-before clearedAt are
+    // hidden from THIS user but remain visible to peers. The cutoff is
+    // applied at the `where` so cursor pagination still terminates correctly.
+    const clearedFilter = member.clearedAt
+      ? { createdAt: { gt: member.clearedAt } }
+      : {};
 
     // Fetch in the requested direction so the cursor selects "newer than" vs
     // "older than" the anchor. We always sort items asc before returning so
     // the client doesn't have to think about it.
     const rows = await this.prisma.message.findMany({
-      where: { chatId },
+      where: { chatId, ...clearedFilter },
       orderBy: [
         { createdAt: direction },
         { id: direction },
@@ -172,6 +216,53 @@ export class MessagesService {
     );
     const sortedAsc = [...trimmedPage.items].sort(
       (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id)
+    );
+
+    return {
+      items: sortedAsc.map(this.rowToDto),
+      meta: trimmedPage.meta,
+    };
+  }
+
+  /**
+   * Per-chat media gallery — feeds the Contact Profile screen's "Media Links
+   * & Docs" tab (BRD §3.3). Same cursor scheme as `list`, narrowed to
+   * media-bearing kinds and filtered by `?kind=` when provided.
+   *
+   * Excludes tombstones — once a message is soft-deleted its `mediaObjectKey`
+   * is zeroed in `deleteMessage`, so even past media stops appearing here.
+   */
+  async listMedia(
+    userId: string,
+    chatId: string,
+    query: ChatMediaListQuery,
+  ): Promise<MessageListResponse> {
+    await this.assertMember(userId, chatId);
+
+    const c = decodeCursor(query.cursor, isMessageCursor);
+    const kindFilter = query.kind ? { kind: query.kind } : { kind: { in: ['IMAGE', 'VOICE'] as MessageKind[] } };
+
+    const rows = await this.prisma.message.findMany({
+      where: {
+        chatId,
+        deletedAt: null,
+        ...kindFilter,
+      },
+      orderBy: [{ createdAt: query.direction }, { id: query.direction }],
+      take: query.limit + 1,
+      ...(c
+        ? {
+            skip: 1,
+            cursor: { id: c.id },
+          }
+        : {}),
+    });
+
+    const trimmedPage = buildPage(rows, query.limit, (last) =>
+      encodeCursor<MessageCursor>({ createdAt: last.createdAt.toISOString(), id: last.id }),
+    );
+    const sortedAsc = [...trimmedPage.items].sort(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id),
     );
 
     return {
@@ -241,6 +332,27 @@ export class MessagesService {
 
   async send(userId: string, chatId: string, body: SendMessageBody): Promise<MessageDto> {
     await this.assertMember(userId, chatId);
+
+    // Block enforcement for 1-on-1 chats — if either party in either direction
+    // has blocked the other, the send is rejected. Group / Super Group chats
+    // don't apply blocks at the message layer (a blocker can leave the group
+    // instead). Lookup is a single PK probe on `blocked_users`.
+    const chatKind = await this.prisma.chat.findUnique({
+      where: { id: chatId },
+      select: { kind: true },
+    });
+    if (chatKind?.kind === 'ONE_ON_ONE') {
+      const counterpart = await this.prisma.chatMember.findFirst({
+        where: { chatId, userId: { not: userId }, leftAt: null },
+        select: { userId: true },
+      });
+      if (counterpart && (await this.blocks.isBlockedEitherWay(userId, counterpart.userId))) {
+        throw new ForbiddenException({
+          code: 'peer_blocked',
+          message: 'Messages cannot be sent in this chat — one of you has blocked the other.',
+        });
+      }
+    }
 
     // Validate the supplied object key belongs to this sender for IMAGE/VOICE
     // before we touch the DB. Stops a client pasting an arbitrary key.

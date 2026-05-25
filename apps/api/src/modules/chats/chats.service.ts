@@ -13,11 +13,14 @@ import {
   type ChatFilterRow,
   type ChatListItem,
   type ChatListResponse,
+  type ClearChatResponse,
   type CreateChatFilterBody,
   type CreateGroupBody,
   type CreateOneOnOneBody,
   type CreateSuperGroupBody,
   type MarkReadBody,
+  type MuteChatBody,
+  type MuteChatResponse,
 } from '@scalechat/shared';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -460,6 +463,56 @@ export class ChatsService {
       data: { archivedAt: value ? new Date() : null },
     });
     return { isArchived: value };
+  }
+
+  /**
+   * Mute notifications for a chat. The client picks the preset (8h, 1 week,
+   * always) by passing `until = now + preset` or `null` to unmute. The push
+   * fanout worker (Phase E) reads `ChatMember.mutedUntil` and skips delivery
+   * to muted memberships.
+   */
+  async setMute(
+    userId: string,
+    chatId: string,
+    body: MuteChatBody,
+  ): Promise<MuteChatResponse> {
+    const member = await this.prisma.chatMember.findUnique({
+      where: { chatId_userId: { chatId, userId } },
+    });
+    if (!member) {
+      throw new NotFoundException({ code: 'chat_not_found', message: 'Chat not found.' });
+    }
+    const until = body.until ? new Date(body.until) : null;
+    await this.prisma.chatMember.update({
+      where: { id: member.id },
+      data: { mutedUntil: until },
+    });
+    return {
+      chatId,
+      mutedUntil: until ? until.toISOString() : null,
+    };
+  }
+
+  /**
+   * Per-user "Clear chat". Sets `clearedAt = now`; subsequent message-list
+   * reads filter to `createdAt > clearedAt` (handled in MessagesService.list).
+   * Counterpart's history is untouched — matches WhatsApp.
+   *
+   * Idempotent — re-calling resets the cutoff forward.
+   */
+  async clearChat(userId: string, chatId: string): Promise<ClearChatResponse> {
+    const member = await this.prisma.chatMember.findUnique({
+      where: { chatId_userId: { chatId, userId } },
+    });
+    if (!member) {
+      throw new NotFoundException({ code: 'chat_not_found', message: 'Chat not found.' });
+    }
+    const now = new Date();
+    await this.prisma.chatMember.update({
+      where: { id: member.id },
+      data: { clearedAt: now },
+    });
+    return { chatId, clearedAt: now.toISOString() };
   }
 
   // ───────────────────────────────────────────────────────────────────────────

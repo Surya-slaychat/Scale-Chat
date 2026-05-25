@@ -16,6 +16,7 @@ import {
   ContactsListQuerySchema,
   UpdateContactSchema,
   type AddContactBody,
+  type CommonGroupsListResponse,
   type Contact,
   type ContactsListQuery,
   type ContactsListResponse,
@@ -65,5 +66,20 @@ export class ContactsController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string
   ): Promise<void> {
     await this.contacts.remove(user.sub, id);
+  }
+
+  /**
+   * `GET /contacts/:contactUserId/common-groups`
+   *
+   * Group chats both the caller and the target user are active members of.
+   * Returns `{ items: [] }` until group / super-group chats ship — the shape
+   * is stable so the Contact Profile screen can render against it today.
+   */
+  @Get(':contactUserId/common-groups')
+  commonGroups(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('contactUserId', new ParseUUIDPipe({ version: '4' })) contactUserId: string,
+  ): Promise<CommonGroupsListResponse> {
+    return this.contacts.listCommonGroups(user.sub, contactUserId);
   }
 }

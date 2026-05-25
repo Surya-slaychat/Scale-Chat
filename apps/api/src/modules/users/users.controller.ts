@@ -1,5 +1,10 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
-import { ProfileUpdateSchema, type ProfileUpdateBody, type SelfUser } from '@scalechat/shared';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, UseGuards } from '@nestjs/common';
+import {
+  ProfileUpdateSchema,
+  type ProfileUpdateBody,
+  type SelfUser,
+  type UserProfileCard,
+} from '@scalechat/shared';
 
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { JwtAuthGuard } from '../../common/auth/jwt-auth.guard';
@@ -27,5 +32,24 @@ export class UsersController {
     @Body(new ZodValidationPipe(ProfileUpdateSchema)) body: ProfileUpdateBody,
   ): Promise<SelfUser> {
     return this.users.updateProfile(user.sub, body);
+  }
+}
+
+/**
+ * Other-user reads. Mounted at `/users` so `/me` can keep its self-view
+ * idiom. Privacy: every endpoint here verifies viewer↔target visibility
+ * inside the service (shared chat OR contact entry), 403 otherwise.
+ */
+@UseGuards(JwtAuthGuard)
+@Controller('users')
+export class OtherUsersController {
+  constructor(private readonly users: UsersService) {}
+
+  @Get(':id/profile-card')
+  profileCard(
+    @CurrentUser() viewer: AccessTokenPayload,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) targetUserId: string,
+  ): Promise<UserProfileCard> {
+    return this.users.getProfileCard(viewer.sub, targetUserId);
   }
 }

@@ -10,8 +10,12 @@
     "api:dev": "npm --workspace=apps/api run dev",
     "api:build": "npm --workspace=apps/api run build",
     "api:start": "npm --workspace=apps/api run start",
+    "api:test:e2e": "npm --workspace=apps/api run test:e2e",
     "api:prisma": "npm --workspace=apps/api run prisma",
     "shared:build": "npm --workspace=packages/shared run build",
+    "db:setup": "node scripts/setup-dev-db.mjs",
+    "db:setup:dry": "node scripts/setup-dev-db.mjs --dry-run",
+    "db:setup:first": "node scripts/setup-dev-db.mjs --create-containers",
     "postinstall": "node scripts/link-expo-router.js"
   },
   "engines": {

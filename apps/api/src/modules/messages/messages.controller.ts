@@ -12,11 +12,13 @@ import {
 } from '@nestjs/common';
 import {
   ChatDetailSchema,
+  ChatMediaListQuerySchema,
   MessageDeleteScopeSchema,
   MessageListQuerySchema,
   MessageSchema,
   SendMessageSchema,
   type ChatDetailDto,
+  type ChatMediaListQuery,
   type MessageDeleteScope,
   type MessageDto,
   type MessageListQuery,
@@ -59,6 +61,20 @@ export class MessagesController {
     @Query(new ZodValidationPipe(MessageListQuerySchema)) query: MessageListQuery
   ): Promise<MessageListResponse> {
     return this.messages.list(user.sub, chatId, query.cursor, query.limit, query.direction);
+  }
+
+  /**
+   * `GET /chats/:chatId/media?kind=IMAGE|VOICE&cursor=&limit=`
+   * Per-chat media gallery for the Contact Profile screen (BRD §3.3 Media
+   * Links & Docs). Reuses the messages cursor scheme.
+   */
+  @Get('media')
+  listMedia(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('chatId', new ParseUUIDPipe({ version: '4' })) chatId: string,
+    @Query(new ZodValidationPipe(ChatMediaListQuerySchema)) query: ChatMediaListQuery,
+  ): Promise<MessageListResponse> {
+    return this.messages.listMedia(user.sub, chatId, query);
   }
 
   @Post('messages')

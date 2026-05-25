@@ -10,11 +10,14 @@ import { RateLimitModule } from './common/rate-limit/rate-limit.module';
 import { RedisModule } from './common/redis/redis.module';
 import { ConfigModule } from './config/config.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { BlocksModule } from './modules/blocks/blocks.module';
 import { ChatsModule } from './modules/chats/chats.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { HealthModule } from './modules/health/health.module';
 import { MediaModule } from './modules/media/media.module';
 import { MessagesModule } from './modules/messages/messages.module';
+import { ReactionsModule } from './modules/reactions/reactions.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { UsersModule } from './modules/users/users.module';
 
 @Module({
@@ -46,6 +49,9 @@ import { UsersModule } from './modules/users/users.module';
     ChatsModule,
     MediaModule,
     MessagesModule,
+    ReportsModule,
+    BlocksModule,
+    ReactionsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

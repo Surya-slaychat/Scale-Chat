@@ -26,18 +26,37 @@ openssl rsa -in /tmp/scalechat-private.pem -pubout -out /tmp/scalechat-public.pe
 echo "JWT_PRIVATE_KEY_B64=$(base64 -i /tmp/scalechat-private.pem | tr -d '\n')" >> apps/api/.env
 echo "JWT_PUBLIC_KEY_B64=$(base64 -i /tmp/scalechat-public.pem | tr -d '\n')" >> apps/api/.env
 
-# Start dependencies (or use Docker Compose if you prefer)
-docker run -d --name scalechat-pg -p 5432:5432 -e POSTGRES_DB=scalechat -e POSTGRES_HOST_AUTH_METHOD=trust postgres:16
-docker run -d --name scalechat-redis -p 6379:6379 redis:7
+# Start dependencies + apply migrations + regenerate Prisma client + rebuild shared.
+# First time only — creates the docker containers with the canonical ports / creds
+# matching apps/api/.env (PG host :5433, Redis host :6380, user/password/db = "scalechat").
+npm run db:setup:first
 
-# Generate Prisma client + run migrations
-npm --workspace=apps/api run prisma:generate
-npm --workspace=apps/api run prisma migrate dev --name init
+# Every subsequent run (containers already exist; just starts them and applies new migrations):
+npm run db:setup
 
-# Build the shared package, then start the API
-npm --workspace=packages/shared run build
+# Then start the API
 npm run api:dev
 ```
+
+### What `npm run db:setup:first` does under the hood
+
+If you'd rather create the containers by hand, this is what the script runs:
+
+```bash
+docker run -d --name scalechat-pg \
+  -p 5433:5432 \
+  -e POSTGRES_DB=scalechat -e POSTGRES_USER=scalechat -e POSTGRES_PASSWORD=scalechat \
+  -v scalechat-pg-data:/var/lib/postgresql/data \
+  postgres:16
+
+docker run -d --name scalechat-redis \
+  -p 6380:6379 \
+  redis:7
+```
+
+After that any `npm run db:setup` (no `--create-containers`) is idempotent — it
+just `docker start`s the containers if stopped, runs `prisma migrate deploy`,
+regenerates the Prisma client, and rebuilds `@scalechat/shared`.
 
 In development, set `ENABLE_DEV_OTP=true` and the OTP printed in stdout (or `DEV_OTP_CODE=1234`) is accepted by `/auth/otp/verify`.
 

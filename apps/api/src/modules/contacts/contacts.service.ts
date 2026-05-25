@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type {
   AddContactBody,
+  CommonGroupsListResponse,
   Contact,
   ContactsListQuery,
   ContactsListResponse,
@@ -158,5 +159,42 @@ export class ContactsService {
     if (result.count === 0) {
       throw new NotFoundException({ code: 'contact_not_found', message: 'Contact not found.' });
     }
+  }
+
+  /**
+   * Group + Super Group chats both the caller and the target user are active
+   * members of. Returns an empty list today — groups land in a later slice;
+   * the shape exists so the Contact Profile screen can render against it now.
+   */
+  async listCommonGroups(
+    callerUserId: string,
+    contactUserId: string,
+  ): Promise<CommonGroupsListResponse> {
+    if (callerUserId === contactUserId) return { items: [] };
+    const rows = await this.prisma.chat.findMany({
+      where: {
+        kind: { in: ['GROUP', 'SUPER_GROUP'] },
+        AND: [
+          { members: { some: { userId: callerUserId, leftAt: null } } },
+          { members: { some: { userId: contactUserId, leftAt: null } } },
+        ],
+      },
+      select: {
+        id: true,
+        title: true,
+        avatarUri: true,
+        _count: { select: { members: { where: { leftAt: null } } } },
+      },
+      orderBy: { lastMessageAt: 'desc' },
+      take: 50,
+    });
+    return {
+      items: rows.map((r) => ({
+        chatId: r.id,
+        title: r.title ?? 'Group',
+        avatarUri: r.avatarUri ?? null,
+        memberCount: r._count.members,
+      })),
+    };
   }
 }

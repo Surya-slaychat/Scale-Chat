@@ -20,16 +20,20 @@ import {
   CreateOneOnOneSchema,
   CreateSuperGroupSchema,
   MarkReadSchema,
+  MuteChatSchema,
   type ChatBooleanSetterBody,
   type ChatFilterRow,
   type ChatFiltersListResponse,
   type ChatListQuery,
   type ChatListResponse,
+  type ClearChatResponse,
   type CreateChatFilterBody,
   type CreateGroupBody,
   type CreateOneOnOneBody,
   type CreateSuperGroupBody,
   type MarkReadBody,
+  type MuteChatBody,
+  type MuteChatResponse,
 } from '@scalechat/shared';
 
 import { CurrentUser } from '../../common/auth/current-user.decorator';
@@ -139,6 +143,23 @@ export class ChatsController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string
   ): Promise<{ isArchived: boolean }> {
     return this.chats.toggleArchive(user.sub, id);
+  }
+
+  @Patch(':id/mute')
+  setMute(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body(new ZodValidationPipe(MuteChatSchema)) body: MuteChatBody,
+  ): Promise<MuteChatResponse> {
+    return this.chats.setMute(user.sub, id, body);
+  }
+
+  @Patch(':id/clear')
+  clearChat(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<ClearChatResponse> {
+    return this.chats.clearChat(user.sub, id);
   }
 
   /**

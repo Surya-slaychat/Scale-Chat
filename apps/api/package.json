@@ -14,7 +14,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "test": "jest",
-    "test:e2e": "jest --config jest-e2e.config.js"
+    "test:e2e": "jest --config jest-e2e.config.js --forceExit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1053.0",

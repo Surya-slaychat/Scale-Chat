@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { paginatedResponse } from './common.js';
+import { ReactionAggregateSchema } from './reactions.js';
 
 export const MessageKindEnum = z.enum(['TEXT', 'VOICE', 'IMAGE', 'SYSTEM']);
 export type MessageKind = z.infer<typeof MessageKindEnum>;
@@ -43,6 +44,12 @@ export const MessageSchema = z.object({
    * of the original content.
    */
   deletedAt: z.string().datetime().nullable(),
+  /**
+   * Emoji reactions aggregated per emoji (Phase 2.1). Empty array when the
+   * message has no reactions. The server folds the `MessageReaction` rows
+   * into this shape on read so clients don't have to.
+   */
+  reactions: z.array(ReactionAggregateSchema).default([]),
 });
 export type MessageDto = z.infer<typeof MessageSchema>;
 
@@ -67,6 +74,23 @@ export const MessageListQuerySchema = z.object({
   direction: z.enum(['asc', 'desc']).optional().default('desc'),
 });
 export type MessageListQuery = z.infer<typeof MessageListQuerySchema>;
+
+/**
+ * Query for `GET /chats/:chatId/media` — the per-chat media gallery used by
+ * the Contact Profile screen (BRD §3.3 "Media Links & Docs").
+ *
+ * `kind` is restricted to media-bearing kinds; TEXT and SYSTEM never appear
+ * in the gallery. Pagination shares the same cursor scheme as the message
+ * list, just narrower content. `direction` defaults to `desc` (newest-first)
+ * — the gallery grid reads top-to-bottom newest → oldest like Photos.app.
+ */
+export const ChatMediaListQuerySchema = z.object({
+  kind: z.enum(['IMAGE', 'VOICE']).optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(60).optional().default(30),
+  direction: z.enum(['asc', 'desc']).optional().default('desc'),
+});
+export type ChatMediaListQuery = z.infer<typeof ChatMediaListQuerySchema>;
 
 export const SendMessageSchema = z
   .object({
@@ -257,6 +281,7 @@ export const SocketEvents = {
   presenceRequest: 'presence:request',
   presenceSnapshot: 'presence:snapshot',
   presenceUpdate: 'presence:update',
+  reactionUpdated: 'reaction:updated',
 } as const;
 
 /** GET /chats/:id — full thread detail for the chat screen. */
@@ -274,5 +299,18 @@ export const ChatDetailSchema = z.object({
     })
     .nullable(),
   lastReadSequence: z.string().regex(/^\d+$/),
+  /**
+   * The counterpart's `lastReadSequence` — how far the OTHER user has read
+   * in this thread. The chat screen uses this on initial load to mark every
+   * mine-message with `sequence ≤ counterpartLastReadSequence` as `read`
+   * (lime double-tick) instead of `delivered` (grey). Without this, bubbles
+   * the peer already read look unread to me until the next interaction.
+   * Null for non-1-on-1 chats (groups have N readers).
+   *
+   * Phase A read-receipt cold-start fix (2026-05-25 verify, finding F1
+   * follow-up). See `docs/progress/1-on-1-production.md` Phase A
+   * Known Limitations #1.
+   */
+  counterpartLastReadSequence: z.string().regex(/^\d+$/).nullable(),
 });
 export type ChatDetailDto = z.infer<typeof ChatDetailSchema>;
