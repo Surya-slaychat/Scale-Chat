@@ -10,12 +10,12 @@ import {
 } from './calls.controller';
 import { CallsRingTimeoutProcessor } from './calls-ring-timeout.processor';
 import { CallsService } from './calls.service';
-import { HmsClient } from './hms.client';
+import { LiveKitClient } from './livekit.client';
 
 @Module({
   imports: [MessagesModule, BlocksModule, BullMQModule],
   controllers: [CallsController, CallsWebhookController, CallsHistoryController],
-  providers: [CallsService, HmsClient, CallsRingTimeoutProcessor],
+  providers: [CallsService, LiveKitClient, CallsRingTimeoutProcessor],
   exports: [CallsService],
 })
 export class CallsModule {}
