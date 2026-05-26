@@ -618,15 +618,15 @@ Backend foundation for voice/video calls. NO mobile UI — verified with curl + 
 
 | Sub-item | Frontend | Backend | Notes |
 |---|---|---|---|
-| **H.0** Socket `user:{userId}` room + multi-device semantics | n/a | 🚫 | Per R4: on socket connect, `socket.join(\`user:${userId}\`)`. `emitToUser(userId, event, payload)` = `server.to(\`user:${userId}\`).emit(...)`. Ring fans out to ALL of a user's devices; **first-accept wins** (server uses `pg_advisory_xact_lock` on `callId` to serialize concurrent accepts; loser receives `409 call_already_accepted`; server broadcasts `call:taken` to other devices so their IncomingCallScreen dismisses). |
-| **H.1** Migration C — `CallSession` table | n/a | 🚫 | One row per call; back-ref to `CALL_EVENT` Message |
-| **H.2** 100ms management client (`hms.client.ts`) | n/a | 🚫 | `createRoom`, `disableRoom`; HS256 client-token mint |
-| **H.3** `CallsModule` REST surface | n/a | 🚫 | token, accept, decline, hangup, history |
-| **H.4** Socket events `call:ring` / `call:accepted` / `call:ended` / `call:taken` | n/a | 🚫 | Added to `messages.gateway.ts` |
-| **H.5** 30s ring-timeout via **BullMQ delayed job** | n/a | 🚫 | Per R5: NOT an in-process `setTimeout`. Job scheduled at token-mint time with `delay: 30_000, jobId: callId`. On fire: load CallSession; if status still RINGING → flip to MISSED + emit `call:ended` + insert CALL_EVENT message. Survives any Fly deploy. |
-| **H.6** Webhook handler `/calls/webhooks/100ms` | n/a | 🚫 | HMAC-SHA256 signature verify; sync `durationSec` |
-| **H.7** Block-aware token mint | n/a | 🚫 | 403 `peer_blocked` if either-way blocked |
-| **H.8** CALL_EVENT message thread row | n/a | 🚫 | Server-only writer (rejected from public `SendMessageSchema`) |
+| **H.0** Socket `user:{userId}` room + multi-device semantics | n/a | ✅ (2026-05-26, 2.F PR-1) | Landed early as part of 2.F's `emitPollVoted` per-viewer broadcast. Same `user:{userId}` room now carries `call:ring` / `call:accepted` / `call:ended` / `call:taken` (2.H PR-1). First-accept-wins via `pg_advisory_xact_lock(callId)` enforced in `calls.service.ts:accept`. |
+| **H.1** Migration C — `CallSession` table | n/a | ✅ (2026-05-26, 2.H PR-1) | `20260528000000_add_call_sessions` — table + `call_kind` enum + `call_status` enum + 3 indexes + `call_event_message_id` UNIQUE back-ref. Prisma model with `@map` on every snake_case column (lesson from 2.F PR-1). |
+| **H.2** 100ms management client (`hms.client.ts`) | n/a | 🟡 stub (PR-1) → real in PR-2 | PR-1 stub returns synthetic room IDs + dev-signed tokens so e2e drives the flow end-to-end. PR-2 will wire the real `https://api.100ms.live/v2/rooms` POST + HS256 sign with `HMS_APP_SECRET`. Gated on the founder's live-test checklist in `docs/architecture/calls-provider-poc.md` § 6. |
+| **H.3** `CallsModule` REST surface | n/a | ✅ (2026-05-26, 2.H PR-1) | 6 routes across 3 controllers: `CallsController` (token/accept/decline/hangup), `CallsWebhookController` (100ms webhook, no JWT), `CallsHistoryController` (`GET /chats/:chatId/calls`). |
+| **H.4** Socket events `call:ring` / `call:accepted` / `call:ended` / `call:taken` | n/a | ✅ (2026-05-26, 2.H PR-1) | Added to `messages.gateway.ts` as `emitCallRing/Accepted/Ended/Taken` — all per-user broadcasts on `user:{userId}` (H.0). |
+| **H.5** 30s ring-timeout via **BullMQ delayed job** | n/a | ✅ (2026-05-26, 2.H PR-1) | New `BullMQModule` (global) + `CallsRingTimeoutProcessor` Worker. `jobId: callId` → accept/decline cancel by id. `bullmq@^5.77` installed; reuses the existing ioredis client (already configured with `maxRetriesPerRequest: null` for BullMQ compat). Tests bypass via `callsService.onRingTimeout(callId)` direct call. |
+| **H.6** Webhook handler `/calls/webhooks/100ms` | n/a | 🟡 stub (PR-1) → real in PR-2 | PR-1 rejects every signature with 403 (e2e case 8 asserts this). PR-2 adds real `HMAC-SHA256(rawBody, HMS_WEBHOOK_SECRET)` constant-time verify + event parser (`session.close.success` → sync `durationSec`). Fastify raw-body parser needs per-route override (see plan §Cross-cutting risks). |
+| **H.7** Block-aware token mint | n/a | ✅ (2026-05-26, 2.H PR-1) | `BlocksService.isBlockedEitherWay` check in `calls.service.ts:mintToken`. E2e case 2 green. |
+| **H.8** CALL_EVENT message thread row | n/a | ✅ (2026-05-26, 2.H PR-1) | Server-authored via `MessagesService.createServerAuthored` (introduced 2.F PR-1). Inserted on every terminal transition (DECLINED / MISSED / COMPLETED) with `clientMessageId: 'call-{callId}-{reason}'` for idempotency. Client-CALL_EVENT rejected 400 (e2e case 10). |
 
 ### Migration C — `20260528000000_add_call_sessions`
 

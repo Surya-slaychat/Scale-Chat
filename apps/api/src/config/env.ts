@@ -56,6 +56,22 @@ export const envSchema = z.object({
   R2_ACCESS_KEY_ID: z.string().min(1).optional(),
   R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
   R2_PUBLIC_BASE_URL: z.string().url().optional(),
+
+  // ─── 100ms (calls provider, Tranche 2.H) ──────────────────────────────────
+  //
+  // Backs the `/calls/token` endpoint. All four optional so local devs can
+  // boot without 100ms credentials; the calls controller returns 503
+  // `calls_not_configured` when unset. (See `docs/architecture/
+  // calls-provider-poc.md` — 100ms picked provisional; LiveKit swap touches
+  // only the env-var prefix + `hms.client.ts`.)
+  //
+  // Defaults to per-call ring-timeout of 30s; tests can set BULLMQ_RING_TIMEOUT_MS
+  // shorter so the suite doesn't have to wait the full window.
+  HMS_MANAGEMENT_TOKEN: z.string().optional(),
+  HMS_APP_ACCESS_KEY: z.string().optional(),
+  HMS_APP_SECRET: z.string().optional(),
+  HMS_WEBHOOK_SECRET: z.string().optional(),
+  BULLMQ_RING_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 });
 
 export type Env = z.infer<typeof envSchema>;

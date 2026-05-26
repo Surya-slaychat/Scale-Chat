@@ -6,11 +6,13 @@ import { AuthCommonModule } from './common/auth/auth-common.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { PrivacyInterceptor } from './common/interceptors/privacy.interceptor';
 import { PrismaModule } from './common/prisma/prisma.module';
+import { BullMQModule } from './common/queues/bullmq.module';
 import { RateLimitModule } from './common/rate-limit/rate-limit.module';
 import { RedisModule } from './common/redis/redis.module';
 import { ConfigModule } from './config/config.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BlocksModule } from './modules/blocks/blocks.module';
+import { CallsModule } from './modules/calls/calls.module';
 import { ChatsModule } from './modules/chats/chats.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { ForwardModule } from './modules/forward/forward.module';
@@ -44,6 +46,7 @@ import { UsersModule } from './modules/users/users.module';
     PrismaModule,
     RedisModule,
     RateLimitModule,
+    BullMQModule,
     AuthCommonModule,
     HealthModule,
     AuthModule,
@@ -58,6 +61,7 @@ import { UsersModule } from './modules/users/users.module';
     ForwardModule,
     PinModule,
     PollsModule,
+    CallsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

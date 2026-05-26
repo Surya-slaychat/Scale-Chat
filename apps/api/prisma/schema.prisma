@@ -47,6 +47,8 @@ model User {
   messageReactions MessageReaction[] @relation("UserReactions")
   pinnedMessages  Message[]      @relation("MessagePinnedBy")
   pollVotes       PollVote[]     @relation("UserPollVotes")
+  callsInitiated  CallSession[]  @relation("CallInitiator")
+  callsReceived   CallSession[]  @relation("CallCallee")
 
   @@index([phoneE164])
   @@map("users")
@@ -211,6 +213,7 @@ model Chat {
   members           ChatMember[]
   messages          Message[]  @relation("ChatMessages")
   lastMessage       Message?   @relation("ChatLastMessage", fields: [lastMessageId], references: [id], onDelete: SetNull)
+  callSessions      CallSession[] @relation("ChatCalls")
 
   @@index([kind, lastMessageAt])
   @@index([lastMessageAt])
@@ -313,6 +316,8 @@ model Message {
   /// Populated on POLL kinds (Tranche 2.F). 1:1 — the `message_id` column on
   /// `poll_messages` is UNIQUE.
   pollMessage       PollMessage?     @relation("MessagePoll")
+  /// Back-ref from a CALL_EVENT message to its CallSession (Tranche 2.H). 1:1.
+  callSession       CallSession?     @relation("CallEventMessage")
 
   @@unique([senderUserId, clientMessageId])
   @@unique([chatId, sequence])
@@ -553,4 +558,64 @@ model PollVote {
   @@index([pollOptionId], map: "poll_votes_by_option_idx")
   @@index([pollMessageId, voterUserId], map: "poll_votes_by_voter_idx")
   @@map("poll_votes")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Calls (Tranche 2.H — 1-on-1 scope).
+//
+// One row per call lifecycle. Status transitions:
+//   RINGING → ACCEPTED → COMPLETED                  (happy path)
+//   RINGING → DECLINED                              (callee declines)
+//   RINGING → MISSED                                (BullMQ ring-timeout fires)
+//
+// `callEventMessageId` back-references the in-thread CALL_EVENT row that
+// the calls service inserts on every terminal transition. Nullable because
+// RINGING has no chat message yet (the CALL_EVENT only lands on
+// MISSED/DECLINED/COMPLETED).
+//
+// Provider-agnostic: `hmsRoomId` is the provider-side room ID (100ms or
+// LiveKit Cloud — see docs/architecture/calls-provider-poc.md). Provider
+// swap is contained in apps/api/src/modules/calls/hms.client.ts.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model CallSession {
+  id                   String     @id @default(uuid()) @db.Uuid
+  chatId               String     @db.Uuid @map("chat_id")
+  initiatorUserId      String     @db.Uuid @map("initiator_user_id")
+  calleeUserId         String     @db.Uuid @map("callee_user_id")
+  kind                 CallKind
+  status               CallStatus
+  hmsRoomId            String?    @db.VarChar(64) @map("hms_room_id")
+  startedAt            DateTime?  @db.Timestamptz(6) @map("started_at")
+  endedAt              DateTime?  @db.Timestamptz(6) @map("ended_at")
+  durationSec          Int?       @map("duration_sec")
+  callEventMessageId   String?    @unique @db.Uuid @map("call_event_message_id")
+  createdAt            DateTime   @default(now()) @db.Timestamptz(6) @map("created_at")
+
+  chat                 Chat       @relation("ChatCalls", fields: [chatId], references: [id], onDelete: Cascade)
+  initiator            User       @relation("CallInitiator", fields: [initiatorUserId], references: [id], onDelete: Restrict)
+  callee               User       @relation("CallCallee", fields: [calleeUserId], references: [id], onDelete: Restrict)
+  callEventMessage     Message?   @relation("CallEventMessage", fields: [callEventMessageId], references: [id], onDelete: SetNull)
+
+  @@index([chatId, createdAt(sort: Desc)], map: "call_sessions_by_chat_idx")
+  @@index([initiatorUserId, createdAt(sort: Desc)], map: "call_sessions_by_initiator_idx")
+  @@index([calleeUserId, createdAt(sort: Desc)], map: "call_sessions_by_callee_idx")
+  @@map("call_sessions")
+}
+
+enum CallKind {
+  VOICE
+  VIDEO
+
+  @@map("call_kind")
+}
+
+enum CallStatus {
+  RINGING
+  ACCEPTED
+  DECLINED
+  MISSED
+  COMPLETED
+
+  @@map("call_status")
 }

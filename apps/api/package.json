@@ -32,6 +32,7 @@
     "@scalechat/shared": "*",
     "@socket.io/redis-adapter": "^8.3.0",
     "argon2": "^0.41.0",
+    "bullmq": "^5.77.4",
     "ioredis": "^5.4.0",
     "nestjs-pino": "^4.4.0",
     "pino": "^9.5.0",

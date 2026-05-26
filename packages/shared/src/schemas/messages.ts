@@ -402,6 +402,10 @@ export const SocketEvents = {
   messagePinned: 'message:pinned',
   messageUnpinned: 'message:unpinned',
   pollVoted: 'poll:voted',
+  callRing: 'call:ring',
+  callAccepted: 'call:accepted',
+  callEnded: 'call:ended',
+  callTaken: 'call:taken',
 } as const;
 
 /** S→C when a message is pinned (Tranche 2.E). Broadcast on `chat:{chatId}`. */

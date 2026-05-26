@@ -16,6 +16,10 @@ import { Inject } from '@nestjs/common';
 import {
   type MessageDto,
   type PollAggregate,
+  type SocketCallAccepted,
+  type SocketCallEnded,
+  type SocketCallRing,
+  type SocketCallTaken,
   type SocketMessageDeleted,
   type SocketMessageSendAck,
   type SocketPresenceUpdate,
@@ -403,6 +407,40 @@ export class MessagesGateway
         poll,
       });
     }
+  }
+
+  // ─── Calls (Tranche 2.H) ──────────────────────────────────────────────────
+  //
+  // All four call events are per-user broadcasts on the existing
+  // `user:{userId}` room (joined on connect in 2.F PR-1). Multi-device:
+  // every device the user is logged into receives the event simultaneously.
+  // First-accept-wins is enforced server-side under `pg_advisory_xact_lock`
+  // in calls.service; `call:taken` then dismisses the IncomingCallScreen
+  // on the callee's losing devices.
+
+  /** S→C `call:ring` to ALL of the callee's devices (multi-device fan-out). */
+  emitCallRing(calleeUserId: string, payload: SocketCallRing): void {
+    this.server.to(userRoomFor(calleeUserId)).emit(SocketEvents.callRing, payload);
+  }
+
+  /** S→C `call:accepted` to ALL of a peer's devices. Called twice per accept
+   *  (once for initiator, once for callee). */
+  emitCallAccepted(userId: string, payload: SocketCallAccepted): void {
+    this.server.to(userRoomFor(userId)).emit(SocketEvents.callAccepted, payload);
+  }
+
+  /** S→C `call:ended` to ALL of a peer's devices. Called twice per
+   *  termination (initiator + callee). `reason` distinguishes missed /
+   *  declined / hangup / webhook. */
+  emitCallEnded(userId: string, payload: SocketCallEnded): void {
+    this.server.to(userRoomFor(userId)).emit(SocketEvents.callEnded, payload);
+  }
+
+  /** S→C `call:taken` to ALL of the callee's devices (the accepting device
+   *  navigates to CallScreen and self-ignores; the other devices dismiss
+   *  the IncomingCallScreen). */
+  emitCallTaken(calleeUserId: string, payload: SocketCallTaken): void {
+    this.server.to(userRoomFor(calleeUserId)).emit(SocketEvents.callTaken, payload);
   }
 }
 
