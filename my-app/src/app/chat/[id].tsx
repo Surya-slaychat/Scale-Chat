@@ -108,8 +108,34 @@ export default function ChatThreadScreen() {
   const [attachOpen, setAttachOpen] = useState(false);
   const [recorderOpen, setRecorderOpen] = useState(false);
   const [comingSoonKey, setComingSoonKey] = useState<
-    'voiceCall' | 'videoCall' | 'chatTheme' | 'exportChat' | 'search' | 'starred' | null
+    'chatTheme' | 'exportChat' | 'search' | 'starred' | null
   >(null);
+
+  // Start a 1-on-1 call (Tranche 2.I): mint a token + navigate to the CallScreen.
+  // The server rings the callee (socket + push). `id` is the chat/thread id.
+  const startCall = useCallback(
+    async (kind: 'VOICE' | 'VIDEO') => {
+      if (!id) return;
+      try {
+        const res = await chatRepository.startCall?.(id, kind);
+        if (!res) return;
+        router.push({
+          pathname: '/chat/call',
+          params: {
+            callId: res.callId,
+            accessToken: res.accessToken,
+            wsUrl: res.wsUrl,
+            kind,
+            peerName: thread?.counterpart.displayName ?? '',
+          },
+        });
+      } catch (err) {
+        Alert.alert('Call failed', err instanceof ApiError ? err.message : ChatCopy.calls.callFailed);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [id, router],
+  );
   // Phase C state. Initial mute / block state isn't yet plumbed through
   // `ChatDetailDto`; the screen defaults to false and flips on user action.
   // Plumbing the initial state lands when Phase E (push) needs to read it.
@@ -481,8 +507,8 @@ export default function ChatThreadScreen() {
         lastSeenAt={peerPresence.lastSeenAt}
         isPeerTyping={peerTyping}
         isMuted={isMuted}
-        onVoiceCall={() => setComingSoonKey('voiceCall')}
-        onVideoCall={() => setComingSoonKey('videoCall')}
+        onVoiceCall={() => void startCall('VOICE')}
+        onVideoCall={() => void startCall('VIDEO')}
         onOpenProfile={() =>
           router.push({ pathname: '/contact/[id]', params: { id: thread.counterpart.id } })
         }
@@ -587,31 +613,6 @@ export default function ChatThreadScreen() {
         }
       />
 
-      <ComingSoonSheet
-        visible={
-          comingSoonKey === 'voiceCall' ||
-          comingSoonKey === 'videoCall'
-        }
-        icon={comingSoonKey === 'videoCall' ? 'video' : 'phone'}
-        title={
-          comingSoonKey === 'voiceCall'
-            ? ChatCopy.comingSoon.voiceCall.title
-            : ChatCopy.comingSoon.videoCall.title
-        }
-        body={
-          comingSoonKey === 'voiceCall'
-            ? ChatCopy.comingSoon.voiceCall.body
-            : ChatCopy.comingSoon.videoCall.body
-        }
-        footnote={
-          comingSoonKey === 'voiceCall'
-            ? ChatCopy.comingSoon.voiceCall.footnote
-            : comingSoonKey === 'videoCall'
-              ? ChatCopy.comingSoon.videoCall.footnote
-              : undefined
-        }
-        onClose={() => setComingSoonKey(null)}
-      />
 
       {/* Phase C — per-chat options + supporting modals */}
       <PerChatOptionsSheet
