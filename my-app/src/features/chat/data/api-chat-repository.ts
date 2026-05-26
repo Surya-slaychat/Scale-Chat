@@ -5,6 +5,8 @@ import type {
   ClearChatResponse,
   CommonGroupsListResponse,
   CreateMessageReportBody,
+  ForwardRequestBody,
+  ForwardResponse,
   MediaUploadKind,
   MediaUploadResponse,
   MessageDto,
@@ -755,6 +757,23 @@ export const apiChatRepository: ChatRepository = {
       restoreReactions(messageId, prevReactions);
       throw err;
     }
+  },
+
+  /**
+   * Forward a message into other chats. The server clones the content into
+   * each target (dropping reply context + reactions) and broadcasts
+   * `message:new` to each target room — our existing `chatSocket.onMessage`
+   * subscriber inserts those copies into the target caches, so there's no
+   * optimistic insert here. We don't splice the source's `forwardCount`
+   * either: the backend doesn't broadcast it, so a live bump would desync.
+   */
+  async forwardMessage(messageId, targetThreadIds) {
+    const body: ForwardRequestBody = { targetChatIds: targetThreadIds };
+    const res = await apiClient.post<ForwardResponse>(
+      `/messages/${messageId}/forward`,
+      body,
+    );
+    return { delivered: res.items.length, skipped: res.skipped.length };
   },
 
   async getProfileCard(userId) {

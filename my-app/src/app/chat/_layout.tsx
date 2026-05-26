@@ -9,7 +9,14 @@ export default function ChatLayout() {
         headerShown: false,
         contentStyle: { backgroundColor: Brand.chatBody },
         animation: 'slide_from_right',
-      }}
-    />
+      }}>
+      {/* The forward picker is a modal sibling of [id]; declaring it here lets
+          it slide up from the bottom while [id] stays mounted underneath, so
+          dismissing returns to the source thread with its scroll/state intact. */}
+      <Stack.Screen
+        name="forward"
+        options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+      />
+    </Stack>
   );
 }

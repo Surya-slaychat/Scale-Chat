@@ -227,6 +227,17 @@ export default function ChatThreadScreen() {
     }
   }
 
+  function handleForward() {
+    // Close the action sheet BEFORE navigating — stacking the forward modal on
+    // top of the still-open action-sheet Modal flickers on Android. Capture the
+    // target first since closing the sheet nulls `sheetMessage`.
+    const m = sheetMessage;
+    setSheetMessage(null);
+    if (m && id) {
+      router.push({ pathname: '/chat/forward', params: { messageId: m.id, fromThreadId: id } });
+    }
+  }
+
   async function handleDelete() {
     if (!sheetMessage) return;
     try {
@@ -350,6 +361,7 @@ export default function ChatThreadScreen() {
           if (sheetMessage) void copyMessageText(sheetMessage);
         }}
         onDelete={handleDelete}
+        onForward={handleForward}
         onReport={() => {
           // Open the reason picker after the action sheet closes itself.
           const m = sheetMessage;

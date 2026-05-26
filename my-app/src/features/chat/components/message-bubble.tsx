@@ -5,6 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Brand, FontWeight, Spacing } from '@/constants/theme';
 import { formatBubbleTime, formatDuration } from '@/lib/format-time';
 
+import { ChatCopy } from '../copy';
 import type { Message } from '../types';
 import { ImageBubble } from './image-bubble';
 import { ReactionsPillRow } from './reactions-pill-row';
@@ -63,6 +64,7 @@ export function MessageBubble({
   if (message.type === 'image' && !isTombstone) {
     return (
       <View style={[styles.outer, { alignItems: isMine ? 'flex-end' : 'flex-start' }]}>
+        {message.forwardedFromMessageId ? <ForwardedLabel color="#979797" /> : null}
         {replyTarget ? (
           <View
             style={[
@@ -116,6 +118,12 @@ export function MessageBubble({
           isTombstone && styles.bubbleTombstone,
           pressed && { opacity: 0.92 },
         ]}>
+        {/* Forwarded label — appears above the body (and any reply quote) when
+            this message is a forwarded copy. Colour forks per bubble side for
+            contrast against the purple (mine) / cream (theirs) surfaces. */}
+        {message.forwardedFromMessageId && !isTombstone ? (
+          <ForwardedLabel color={isMine ? 'rgba(255,255,255,0.7)' : Brand.chatHeaderTop} />
+        ) : null}
         {/* Reply quote — appears above the body when this message replies to another. */}
         {replyTarget && !isTombstone ? (
           <View
@@ -182,6 +190,19 @@ export function MessageBubble({
   );
 }
 
+/** "↪ Forwarded" label rendered above a forwarded message's body. The colour
+ *  is supplied by the caller so it can fork per bubble side / per branch. */
+function ForwardedLabel({ color }: { color: string }) {
+  return (
+    <View style={styles.forwardedRow}>
+      <Feather name="corner-up-right" size={11} color={color} />
+      <ThemedText style={[styles.forwardedText, { color }]}>
+        {ChatCopy.forward.label}
+      </ThemedText>
+    </View>
+  );
+}
+
 /** Single-line preview shown inside a reply quote — depends on source kind. */
 function replyPreview(replyTarget: Message): string {
   if (replyTarget.deletedAt) return 'This message was deleted';
@@ -243,6 +264,18 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     fontWeight: FontWeight.semibold,
     letterSpacing: -0.14,
+  },
+  forwardedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  forwardedText: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    fontWeight: FontWeight.regular,
+    letterSpacing: -0.1,
   },
   tombstoneRow: {
     flexDirection: 'row',

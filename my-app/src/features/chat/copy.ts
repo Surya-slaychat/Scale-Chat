@@ -29,6 +29,24 @@ export const ChatCopy = {
     yesterdayLabel: 'Yesterday',
   },
 
+  /** Forward (Tranche 2.E). */
+  forward: {
+    /** Action-sheet row + picker CTA verb. */
+    action: 'Forward',
+    /** Picker screen title. */
+    pickerTitle: 'Forward to…',
+    /** Transient state while the forward POST is in flight. */
+    sending: 'Sending…',
+    /** Brief success confirmation shown in the picker before it dismisses. */
+    sent: 'Sent ✓',
+    /** Inline error if the forward fails. */
+    failed: 'Could not forward. Tap to retry.',
+    /** Small label above a forwarded bubble. */
+    label: 'Forwarded',
+    /** Empty-picker copy (no other chats to forward to). */
+    empty: 'No other chats to forward to',
+  },
+
   attachments: {
     title: 'Share',
     camera: 'Camera',

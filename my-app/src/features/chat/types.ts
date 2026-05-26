@@ -84,6 +84,24 @@ export type MessageBase = {
    * carry the fresh aggregate which we splice into the cached message.
    */
   reactions?: ReactionAggregate[];
+  /**
+   * Set when this message is a forwarded copy of another (Tranche 2.E). The
+   * bubble renders a small "↪ Forwarded" label above the body. The server
+   * keeps the actual source id private; the client only needs presence/absence.
+   */
+  forwardedFromMessageId?: string | null;
+  /**
+   * How many times this (source) message has been forwarded. Drives a future
+   * "Forwarded many times" pill; carried now so the Pin/Forward type doesn't
+   * need re-touching. Defaults to 0.
+   */
+  forwardCount?: number;
+  /**
+   * Non-null when this message is pinned (Tranche 2.E-front-pin). Carried here
+   * so the next PR (bubble pin pip) doesn't re-touch this type; unused in the
+   * Forward-only PR.
+   */
+  pinnedAt?: string | null;
 };
 
 export type TextMessage = MessageBase & {

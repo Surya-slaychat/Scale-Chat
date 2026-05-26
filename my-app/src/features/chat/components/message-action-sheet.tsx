@@ -4,6 +4,7 @@ import { Modal, Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { Brand, FontWeight } from '@/constants/theme';
 
+import { ChatCopy } from '../copy';
 import type { Message } from '../types';
 import { ReactionsStrip } from './reactions-strip';
 
@@ -24,6 +25,8 @@ type Props = {
   onReply: () => void;
   onCopy: () => void;
   onDelete: () => void;
+  /** Forward this message — opens the forward picker (Tranche 2.E). */
+  onForward?: () => void;
   /** When provided, a "Report" row is shown on counterpart bubbles (non-tombstones). */
   onReport?: () => void;
   /**
@@ -57,6 +60,7 @@ export function MessageActionSheet({
   onCopy,
   onDelete,
   onReport,
+  onForward,
   onReact,
   onOpenEmojiPicker,
 }: Props) {
@@ -74,6 +78,14 @@ export function MessageActionSheet({
   const actions: Action[] = [];
   if (!isTombstone) {
     actions.push({ key: 'reply', label: 'Reply', icon: 'corner-up-left', onPress: onReply });
+    if (onForward) {
+      actions.push({
+        key: 'forward',
+        label: ChatCopy.forward.action,
+        icon: 'corner-up-right',
+        onPress: onForward,
+      });
+    }
     if (isText) {
       actions.push({ key: 'copy', label: 'Copy', icon: 'copy', onPress: onCopy });
     }

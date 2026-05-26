@@ -107,6 +107,17 @@ export interface ChatRepository {
   addReaction?(messageId: string, emoji: string): Promise<void>;
   /** Remove the viewer's own reaction. 200 even if no row existed (idempotent). */
   removeReaction?(messageId: string, emoji: string): Promise<void>;
+  /**
+   * Forward a message into one or more other chats (Tranche 2.E). Returns the
+   * per-target outcome: `delivered` copies created + `skipped` targets (not a
+   * member / peer-blocked / source not forwardable — silently skipped, matching
+   * WhatsApp). Each delivered target receives the new copy via `message:new`,
+   * so this doesn't insert optimistically into the target cache.
+   */
+  forwardMessage?(
+    messageId: string,
+    targetThreadIds: string[],
+  ): Promise<{ delivered: number; skipped: number }>;
   /** Subscribe to repository changes (any thread/message update). */
   subscribe(listener: () => void): () => void;
 }

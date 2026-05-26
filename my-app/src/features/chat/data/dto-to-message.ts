@@ -27,6 +27,11 @@ export function dtoToMessage(m: MessageDto, counterpartId: string): Message {
     // Reactions ride on every MessageDto (defaulted to `[]` server-side per
     // shared zod schema). Carry through so the bubble can render pills.
     reactions: m.reactions ?? [],
+    // Forward / pin metadata (Tranche 2.E). `?? null` / `?? 0` guard against
+    // in-flight DTOs (socket replays, mock rows) authored before these columns.
+    forwardedFromMessageId: m.forwardedFromMessageId ?? null,
+    forwardCount: m.forwardCount ?? 0,
+    pinnedAt: m.pinnedAt ?? null,
   };
   if (m.kind === 'VOICE') {
     return {

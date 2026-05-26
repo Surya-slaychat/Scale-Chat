@@ -149,6 +149,30 @@ describe('dtoToMessage — tombstone + reply', () => {
   });
 });
 
+describe('dtoToMessage — forward / pin metadata (Tranche 2.E)', () => {
+  it('carries forwardedFromMessageId through so the bubble shows the Forwarded label', () => {
+    const SRC = '33333333-0000-4000-8000-000000000003';
+    const dto = makeDto({ forwardedFromMessageId: SRC });
+    const m = dtoToMessage(dto, COUNTERPART_ID);
+    expect(m.forwardedFromMessageId).toBe(SRC);
+  });
+
+  it('defaults forward / pin fields when the server omits them (legacy / in-flight rows)', () => {
+    // makeDto base has no forward/pin fields — the mapper must still yield safe defaults.
+    const m = dtoToMessage(makeDto({}), COUNTERPART_ID);
+    expect(m.forwardedFromMessageId).toBeNull();
+    expect(m.forwardCount).toBe(0);
+    expect(m.pinnedAt).toBeNull();
+  });
+
+  it('passes forwardCount + pinnedAt through when present', () => {
+    const PINNED_AT = '2026-05-25T11:00:00.000Z';
+    const m = dtoToMessage(makeDto({ forwardCount: 4, pinnedAt: PINNED_AT }), COUNTERPART_ID);
+    expect(m.forwardCount).toBe(4);
+    expect(m.pinnedAt).toBe(PINNED_AT);
+  });
+});
+
 describe('dtoToMessage — senderId resolution', () => {
   it("returns 'me' when senderUserId !== counterpartId regardless of which 'me' actually is", () => {
     // The repo resolves any non-counterpart sender to 'me'. This is a deliberate

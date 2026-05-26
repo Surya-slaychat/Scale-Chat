@@ -52,9 +52,12 @@ export const SEED_MESSAGES: Record<string, Message[]> = {
     { id: 'm6', threadId: 't-naman', senderId: 'me', sequence: 6, createdAt: minutesAgo(25), status: 'read',
       type: 'voice', durationSec: 39, waveform: makeWaveform(11) },
     { id: 'm7', threadId: 't-naman', senderId: 'c-naman', sequence: 7, createdAt: minutesAgo(10), status: 'read',
-      type: 'text', text: 'Catch up later?' },
+      // Seeded forwarded message (Tranche 2.E) so the "↪ Forwarded" label renders
+      // on a fresh mock load — counterpart side (cream bubble, blue label).
+      type: 'text', text: 'Catch up later?', forwardedFromMessageId: 'seed-fwd-src-1' },
     { id: 'm8', threadId: 't-naman', senderId: 'me', sequence: 8, createdAt: minutesAgo(7), status: 'delivered',
-      type: 'text', text: 'Sure. Ping me.' },
+      // Mine side (purple bubble, white-alpha label).
+      type: 'text', text: 'Sure. Ping me.', forwardedFromMessageId: 'seed-fwd-src-2' },
     { id: 'm9', threadId: 't-naman', senderId: 'c-naman', sequence: 9, createdAt: minutesAgo(3), status: 'read',
       type: 'text', text: 'Done !' },
   ],

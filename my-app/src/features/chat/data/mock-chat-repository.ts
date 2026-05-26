@@ -276,6 +276,63 @@ export const mockChatRepository: ChatRepository = {
     mutateReaction(messageId, emoji, false);
   },
 
+  // Forward (Tranche 2.E). Clone the source content into each target thread —
+  // dropping reply context AND reactions (forwards don't carry either), setting
+  // `forwardedFromMessageId` so the bubble shows the "↪ Forwarded" label, and
+  // assigning a fresh id + sequence per target. `persist()` fires the listener
+  // bus so an open target thread repaints (the mock has no socket).
+  async forwardMessage(messageId, targetThreadIds) {
+    await sleep();
+    const s = getState();
+
+    // Locate the source message across every thread (screen passes only an id).
+    let source: Message | null = null;
+    for (const list of Object.values(s.messagesByThread)) {
+      const found = list.find((m) => m.id === messageId);
+      if (found) {
+        source = found;
+        break;
+      }
+    }
+    if (!source || source.deletedAt) {
+      return { delivered: 0, skipped: targetThreadIds.length };
+    }
+
+    let delivered = 0;
+    let skipped = 0;
+    const threadIds = new Set(s.threads.map((t) => t.id));
+    for (const targetId of targetThreadIds) {
+      if (!threadIds.has(targetId)) {
+        skipped += 1;
+        continue;
+      }
+      const sequence = nextSequence(targetId);
+      const clone = {
+        ...source,
+        id: `fwd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        threadId: targetId,
+        senderId: 'me' as const,
+        sequence,
+        createdAt: new Date().toISOString(),
+        status: 'sent' as const,
+        forwardedFromMessageId: source.id,
+        // Forwarded copies stand alone — no reply context, no inherited reactions.
+        replyToMessageId: null,
+        reactions: [],
+      } as Message;
+      const list = s.messagesByThread[targetId] ?? [];
+      s.messagesByThread = { ...s.messagesByThread, [targetId]: [...list, clone] };
+      s.threads = s.threads.map((t) =>
+        t.id === targetId
+          ? { ...t, lastMessage: clone, lastReadSequence: sequence, unreadCount: 0 }
+          : t,
+      );
+      delivered += 1;
+    }
+    persist();
+    return { delivered, skipped };
+  },
+
   async markThreadRead(threadId) {
     await sleep();
     const s = getState();

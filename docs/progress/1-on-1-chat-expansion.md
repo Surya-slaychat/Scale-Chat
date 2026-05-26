@@ -137,7 +137,7 @@ These items are an executable checklist — when the gating tranche begins, the 
 | **2.0** | Dev pipeline documentation | `instruction-to-run-the-app.md` + `my-app/CLAUDE.md` §7.5 + 3 helper npm scripts + Knowledge base K1–K10. **Docs-only; zero native deps installed.** ✅ LANDED 2026-05-25 (`e70ce46`). | n/a | ✅ | — | — |
 | **2.A** | Reactions mobile UI | ✅ **LANDED 2026-05-25** (`c23365f` + mock follow-up). reactions strip + pill row + `rn-emoji-keyboard` picker + socket `reaction:updated` sync + optimistic add/remove (api + mock repos). QA-passed on Android emulator: strip renders, picker opens + themed, emoji-select → pill renders. | none | ✅ | — | 2.0 |
 | **2.B** | Schema foundation | ✅ **LANDED 2026-05-25**. `MessageKind` +7 values, 16 nullable `Message` columns (Migration A), `MediaService` DOCUMENT/VIDEO, discriminated-union send validators, `SERVER_ONLY_KINDS` guard. 26/26 e2e green. | ✅ | none | A | 2.0 |
-| **2.E** | Forward + Pin (+ ~~Message Info~~ deferred) | **Split by layer.** 2.E-back (Forward + Pin modules + gateway events + e2e) ✅ **LANDED 2026-05-25**; 2.E-front (mobile UI) pending. Message-Info deferred (no `readAt`). | 🚧 front | ✅ back | — | 2.B |
+| **2.E** | Forward + Pin (+ ~~Message Info~~ deferred) | **Split by layer, then front re-split.** 2.E-back ✅ **LANDED 2026-05-25**. 2.E-front-forward (Forward UI: action row + picker + bubble label) ✅ **LANDED 2026-05-25**. 2.E-front-pin (Pin UI: rows + optimistic + socket + bubble pip) pending. Pinned strip + Message-Info deferred. | 🚧 forward ✅ / pin pending | ✅ back | — | 2.B |
 | **2.H** | Calls signalling (server) | `CallSession` table + 100ms-or-LiveKit-Cloud client + ring/accept/decline/hangup REST + webhook + **`user:{userId}` socket room** + **BullMQ ring-timeout** | ✅ | none | C | 2.B + POC complete |
 | **2.I** | Call UI + push wakeup + **EAS migration** | `UserDevice` table + push module + CallScreen + IncomingCallScreen + provider SDK install + **first tranche to require EAS Build** (push wakeup + calls can't be tested on emulator alone) | ✅ | ✅ | D | 2.H + EAS + Apple Dev account |
 | **2.C** | Document + Video kinds | wire AttachSheet tiles + bubble renderers + composer camera-shortcut | (extends 2.B) | ✅ | — | 2.B |
@@ -435,21 +435,25 @@ Plus `android.config.googleMaps.apiKey` + `ios.config.googleMapsApiKey` (or fall
 
 ## Tranche 2.E — Forward + Pin + Message Info
 
-> **Split + scoped by a 3-agent review (2026-05-25).** This tranche is delivered in two PRs by LAYER: **2.E-back** (backend, ✅ LANDED 2026-05-25) and **2.E-front** (mobile UI, pending). **Message-Info is DEFERRED entirely** — read *status* only (no `readAt` in the model) duplicates the existing lime read-tick; revisit when a real read-time exists. **Pin tap-to-scroll is deferred** (display-only strip in 2.E-front — `FlatList.scrollToIndex` foot-gun). Forward cap is 20 server-side (the old BRD "5" was a frontend UI cap → 2.E-front decides its own).
+> **Split + scoped by a 3-agent review (2026-05-25).** This tranche is delivered by LAYER: **2.E-back** (backend, ✅ LANDED 2026-05-25) and **2.E-front** (mobile UI). **Message-Info is DEFERRED entirely** — read *status* only (no `readAt` in the model) duplicates the existing lime read-tick; revisit when a real read-time exists. Forward cap is 20 server-side (the old BRD "5" was a frontend UI cap → 2.E-front decides its own).
+>
+> **2.E-front re-split by a 5-agent review (2026-05-25).** A 5-agent review of the mobile plan converged on three structural changes, so **2.E-front ships in two PRs**: **2.E-front-forward** (Forward UI — ✅ **LANDED 2026-05-25**) and **2.E-front-pin** (Pin UI — pending). Three review fixes baked in: (1) **single-select** forward, not multi-select — the old multi-select + checkbox + skipped-count UI was group-era machinery in a group-less v1; (2) **stay-in-source + inline "Sent ✓"** confirmation, NOT `router.replace`-to-destination (jarring) or a blocking `Alert`; (3) the **pinned strip is deferred** — its cache-derivation was structurally broken (pins scroll out of the loaded window → the `if(at<0) return` socket-unpin subscriber no-ops → stale ghost pin, and mock mode masks it by returning the full list). When Pin ships, pinned state shows via a **bubble `bookmark` pip** (a strip, if ever, uses re-fetch-on-event, never cache-derivation). Two icon/nav bugs the review caught: `pin` is not a Feather glyph (use `bookmark`); `router.push` params must be object-form `{ pathname, params }`, not positional.
 
 ### Status table
 
 | Sub-item | Frontend | Backend | Notes |
 |---|---|---|---|
 | **E.1** `ForwardModule` | n/a | ✅ | `POST /messages/:id/forward { targetChatIds[1..20] }`. Per-target partial success (`items` + `skipped`); deterministic hashed `clientMessageId` (`fwd_`+sha256 — fits VarChar(64)); blocks tombstone + server-only kinds; `forwardCount` bumps only on newly-created copies; clones content + drops `replyToMessageId`. |
-| **E.2** ForwardPickerScreen | 🚫 (2.E-front) | n/a | Nested `chat/[id]/forward.tsx` (not global `(modals)`); multi-select; single-target → `router.replace` to dest, multi → dismiss + Alert. |
+| **E.2** ForwardPickerScreen | ✅ (2.E-front-forward, 2026-05-25) | n/a | **Sibling** `chat/forward.tsx` (modal, `slide_from_bottom`) — NOT nested/`(modals)` — so dismiss returns to the source thread mounted underneath. **Single-select** (no multi/checkbox/cap); tap a chat → `forwardMessage(id,[targetId])` → inline lime "Sent ✓" → auto-dismiss back to source (no destination-jump, no Alert). Reuses `Avatar` via a lightweight `forward-picker-row.tsx`. Source thread excluded from the list. |
 | **E.3** `PinModule` | n/a | ✅ | `PATCH/DELETE /chats/:chatId/messages/:id/pin` + `GET /chats/:chatId/pins`. Cross-chat guard (404 `message_not_in_chat`). |
 | **E.4** Pin cap (3 per chat) | n/a | ✅ | Count+update under `pg_advisory_xact_lock(chatId)` (race-safe); 4th → 409 `pin_cap_exceeded`. |
 | **E.5** PinnedMessageStrip component | 🚫 (2.E-front) | n/a | Below ChatHeader; **display-only** (derives pins from the message cache, not a separate fetch); tap-to-scroll deferred. |
 | **E.6** Socket events `message:pinned` / `message:unpinned` | n/a | ✅ | `emitMessagePinned`/`emitMessageUnpinned` broadcast to `chat:{chatId}`. |
 | ~~**E.7** `GET /messages/:id/info`~~ | — | ⏸ DEFERRED | Read-status-only duplicates the read-tick; no `readAt` timestamp in the model. Revisit later. |
 | ~~**E.8** MessageInfoScreen~~ | — | — | Deferred with E.7. |
-| **E.9** MessageActionSheet — new rows | 🚫 (2.E-front) | n/a | Forward (both) + Pin/Unpin (both); Message Info row dropped (deferred). |
+| **E.9a** MessageActionSheet — Forward row | ✅ (2.E-front-forward, 2026-05-25) | n/a | Forward row (`corner-up-right`) after Reply on every non-tombstone bubble; string in `ChatCopy.forward`. |
+| **E.9b** MessageActionSheet — Pin/Unpin rows | 🚫 (2.E-front-pin) | n/a | Pin/Unpin (`bookmark`) + optimistic + socket + bubble pip — next PR. Message Info row dropped (deferred). |
+| **E.10** "↪ Forwarded" bubble label | ✅ (2.E-front-forward, 2026-05-25) | n/a | Rendered when `forwardedFromMessageId` set, in both bubble branches; colour forks per side (mine white-alpha / theirs `chatHeaderTop` / image grey-on-black). `forwardMessage` plumbed through `ChatRepository` (api `POST /messages/:id/forward`; mock clones + drops reply/reactions + `persist()`). `forwardedFromMessageId`/`forwardCount`/`pinnedAt` added to `MessageBase` + `dtoToMessage` (+ 3 Jest cases). |
 
 ### New module — `apps/api/src/modules/forward/`
 
