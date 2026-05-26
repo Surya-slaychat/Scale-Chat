@@ -8,6 +8,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -30,6 +31,7 @@ import { BlocksService } from '../blocks/blocks.service';
 import { MessagesGateway } from '../messages/messages.gateway';
 import { MessagesService } from '../messages/messages.service';
 import { LiveKitClient } from './livekit.client';
+import { PushService } from '../push/push.service';
 
 /**
  * Calls signalling service — Tranche 2.H (1-on-1 scope).
@@ -83,6 +85,7 @@ export class CallsService {
     private readonly livekit: LiveKitClient,
     private readonly config: ConfigService<Env, true>,
     @Inject(CALL_RING_QUEUE) private readonly ringQueue: Queue,
+    @Optional() private readonly pushService?: PushService,
   ) {
     this.ringTimeoutMs = this.config.get('BULLMQ_RING_TIMEOUT_MS', { infer: true }) ?? 30_000;
   }
@@ -198,8 +201,17 @@ export class CallsService {
       },
     );
 
-    // 8. (Future / Tranche 2.I): push wakeup for offline devices.
-    //    `pushService?.notify({ userIds: [calleeUserId], payload: { type: 'call:ring', ... } })`.
+    // 8. Push wakeup for backgrounded callee devices (Tranche 2.I). Best-effort
+    //    + inline (1-on-1 = single callee); the socket call:ring already covers
+    //    online devices. Never suppressed by mute — a ringing call must ring.
+    await this.pushService?.notifyCall(calleeUserId, {
+      callId,
+      chatId,
+      kind,
+      roomName: room.id,
+      initiatorName: initiatorProfile?.fullName ?? 'Someone',
+      ringExpiresAt: ringExpiresAt.toISOString(),
+    });
 
     return {
       callId,
