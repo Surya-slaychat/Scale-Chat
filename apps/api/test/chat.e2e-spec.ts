@@ -695,6 +695,235 @@ describe('1-on-1 chat (REST happy path)', () => {
     expect(crossChat.statusCode).toBe(404);
   });
 
+  // ─── Tranche 2.F — Polls (1-on-1 scope) ───────────────────────────────────
+  //
+  // 7 cases backing the spec in `docs/progress/1-on-1-chat-expansion.md` §2.F.
+  // All cases run against the real PollsModule with the Migration B tables.
+
+  async function createPoll(
+    chatId: string,
+    token: string,
+    overrides: Partial<{
+      question: string;
+      options: string[];
+      multiSelect: boolean;
+    }> = {},
+  ): Promise<{ messageId: string; optionIds: string[]; pollMessageId: string }> {
+    const res = await authedInject(testApp, {
+      method: 'POST',
+      url: `/chats/${chatId}/polls`,
+      token,
+      payload: {
+        clientMessageId: cli(),
+        question: overrides.question ?? 'Lunch?',
+        options: overrides.options ?? ['Pizza', 'Sushi'],
+        multiSelect: overrides.multiSelect ?? false,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json<{
+      id: string;
+      kind: string;
+      poll: { pollMessageId: string; options: Array<{ id: string; label: string; ordinal: number }> };
+    }>();
+    expect(body.kind).toBe('POLL');
+    return {
+      messageId: body.id,
+      optionIds: body.poll.options.map((o) => o.id),
+      pollMessageId: body.poll.pollMessageId,
+    };
+  }
+
+  it('POST /chats/:id/polls persists PollMessage + N options in one tx', async () => {
+    const chatId = await oneOnOne();
+    const created = await createPoll(chatId, alice.accessToken, {
+      question: 'Lunch today?',
+      options: ['Pizza', 'Sushi', 'Salad'],
+    });
+
+    expect(created.optionIds).toHaveLength(3);
+
+    // DB sanity: 1 PollMessage row, 3 PollOption rows, 0 PollVote rows.
+    const pmRows = await testApp.prisma.pollMessage.findMany({
+      where: { messageId: created.messageId },
+    });
+    expect(pmRows).toHaveLength(1);
+    expect(pmRows[0]?.question).toBe('Lunch today?');
+    expect(pmRows[0]?.multiSelect).toBe(false);
+    expect(pmRows[0]?.closedAt).toBeNull();
+
+    const optRows = await testApp.prisma.pollOption.findMany({
+      where: { pollMessageId: created.pollMessageId },
+      orderBy: { ordinal: 'asc' },
+    });
+    expect(optRows.map((o) => o.label)).toEqual(['Pizza', 'Sushi', 'Salad']);
+
+    const voteRows = await testApp.prisma.pollVote.findMany({
+      where: { pollMessageId: created.pollMessageId },
+    });
+    expect(voteRows).toHaveLength(0);
+
+    // Returned MessageDto.poll is populated with zero counts and votedByMe=false.
+    const fetch = await authedInject(testApp, {
+      method: 'GET',
+      url: `/messages/${created.messageId}/poll`,
+      token: alice.accessToken,
+    });
+    expect(fetch.statusCode).toBe(200);
+    const agg = fetch.json<{
+      totalVoters: number;
+      options: Array<{ count: number; votedByMe: boolean }>;
+    }>();
+    expect(agg.totalVoters).toBe(0);
+    expect(agg.options.every((o) => o.count === 0 && o.votedByMe === false)).toBe(true);
+  });
+
+  it('vote idempotent — same optionIds twice leaves a single PollVote row', async () => {
+    const chatId = await oneOnOne();
+    const { messageId, optionIds, pollMessageId } = await createPoll(chatId, alice.accessToken);
+
+    const v1 = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/vote`,
+      token: bob.accessToken,
+      payload: { optionIds: [optionIds[0]] },
+    });
+    expect(v1.statusCode).toBe(200);
+
+    const v2 = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/vote`,
+      token: bob.accessToken,
+      payload: { optionIds: [optionIds[0]] },
+    });
+    expect(v2.statusCode).toBe(200);
+
+    const rows = await testApp.prisma.pollVote.findMany({
+      where: { pollMessageId, voterUserId: bob.id },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.pollOptionId).toBe(optionIds[0]);
+  });
+
+  it('multi-select honored — vote [A,B] then [B,C] diffs correctly', async () => {
+    const chatId = await oneOnOne();
+    const { messageId, optionIds, pollMessageId } = await createPoll(chatId, alice.accessToken, {
+      options: ['A', 'B', 'C'],
+      multiSelect: true,
+    });
+    const [a, b, c] = optionIds;
+
+    const v1 = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/vote`,
+      token: bob.accessToken,
+      payload: { optionIds: [a, b] },
+    });
+    expect(v1.statusCode).toBe(200);
+
+    const v2 = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/vote`,
+      token: bob.accessToken,
+      payload: { optionIds: [b, c] },
+    });
+    expect(v2.statusCode).toBe(200);
+    const agg = v2.json<{
+      options: Array<{ id: string; count: number; votedByMe: boolean }>;
+    }>();
+    const byId = Object.fromEntries(agg.options.map((o) => [o.id, o]));
+    expect(byId[a]).toMatchObject({ count: 0, votedByMe: false });
+    expect(byId[b]).toMatchObject({ count: 1, votedByMe: true });
+    expect(byId[c]).toMatchObject({ count: 1, votedByMe: true });
+
+    const rows = await testApp.prisma.pollVote.findMany({
+      where: { pollMessageId, voterUserId: bob.id },
+    });
+    expect(rows.map((r) => r.pollOptionId).sort()).toEqual([b, c].sort());
+  });
+
+  it('single-select revote replaces prior vote', async () => {
+    const chatId = await oneOnOne();
+    const { messageId, optionIds, pollMessageId } = await createPoll(chatId, alice.accessToken);
+    const [a, b] = optionIds;
+
+    await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/vote`,
+      token: bob.accessToken,
+      payload: { optionIds: [a] },
+    });
+    const final = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/vote`,
+      token: bob.accessToken,
+      payload: { optionIds: [b] },
+    });
+    expect(final.statusCode).toBe(200);
+    const byId = Object.fromEntries(
+      final
+        .json<{ options: Array<{ id: string; count: number; votedByMe: boolean }> }>()
+        .options.map((o) => [o.id, o]),
+    );
+    expect(byId[a]).toMatchObject({ count: 0, votedByMe: false });
+    expect(byId[b]).toMatchObject({ count: 1, votedByMe: true });
+
+    const rows = await testApp.prisma.pollVote.findMany({
+      where: { pollMessageId, voterUserId: bob.id },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.pollOptionId).toBe(b);
+  });
+
+  it('vote on closed poll → 409 poll_closed', async () => {
+    const chatId = await oneOnOne();
+    const { messageId, optionIds } = await createPoll(chatId, alice.accessToken);
+    const close = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/poll/close`,
+      token: alice.accessToken,
+    });
+    expect(close.statusCode).toBe(200);
+    expect(close.json<{ closedAt: string | null }>().closedAt).not.toBeNull();
+
+    const vote = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/vote`,
+      token: bob.accessToken,
+      payload: { optionIds: [optionIds[0]] },
+    });
+    expect(vote.statusCode).toBe(409);
+    expect(vote.json<{ error: { code: string } }>().error.code).toBe('poll_closed');
+  });
+
+  it('non-member vote → 403 not_a_member', async () => {
+    const chatId = await oneOnOne();
+    const { messageId, optionIds } = await createPoll(chatId, alice.accessToken);
+
+    const res = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/vote`,
+      token: mallory.accessToken,
+      payload: { optionIds: [optionIds[0]] },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json<{ error: { code: string } }>().error.code).toBe('not_a_member');
+  });
+
+  it('close by non-sender → 403 not_sender', async () => {
+    const chatId = await oneOnOne();
+    const { messageId } = await createPoll(chatId, alice.accessToken);
+
+    // Bob is a member but didn't author the poll.
+    const res = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/poll/close`,
+      token: bob.accessToken,
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json<{ error: { code: string } }>().error.code).toBe('not_sender');
+  });
+
   // Phase 2 cases — extended as the features land.
   it.todo('Case 11 — Phase 2.2 Edit: in-window 200, outside-window 400 edit_window_expired');
   it.todo('Case 13 — Phase 2.5 Search: ILIKE match on TEXT only');

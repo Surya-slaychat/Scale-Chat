@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { paginatedResponse } from './common.js';
+import { PollAggregateSchema } from './polls.js';
 import { ReactionAggregateSchema } from './reactions.js';
 
 export const MessageKindEnum = z.enum([
@@ -97,6 +98,13 @@ export const MessageSchema = z.object({
    * into this shape on read so clients don't have to.
    */
   reactions: z.array(ReactionAggregateSchema).default([]),
+  /**
+   * Poll aggregate (Tranche 2.F). Present (non-null) when `kind === 'POLL'`;
+   * the server folds `PollMessage` + `PollOption` + `PollVote` rows into this
+   * shape on read so clients render the bubble off a single DTO. Tombstones
+   * (deletedAt non-null) zero this out alongside text/media.
+   */
+  poll: PollAggregateSchema.nullable().default(null),
 });
 export type MessageDto = z.infer<typeof MessageSchema>;
 
@@ -393,6 +401,7 @@ export const SocketEvents = {
   reactionUpdated: 'reaction:updated',
   messagePinned: 'message:pinned',
   messageUnpinned: 'message:unpinned',
+  pollVoted: 'poll:voted',
 } as const;
 
 /** S→C when a message is pinned (Tranche 2.E). Broadcast on `chat:{chatId}`. */

@@ -18,6 +18,7 @@ import { HealthModule } from './modules/health/health.module';
 import { MediaModule } from './modules/media/media.module';
 import { MessagesModule } from './modules/messages/messages.module';
 import { PinModule } from './modules/pin/pin.module';
+import { PollsModule } from './modules/polls/polls.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { UsersModule } from './modules/users/users.module';
@@ -56,6 +57,7 @@ import { UsersModule } from './modules/users/users.module';
     ReactionsModule,
     ForwardModule,
     PinModule,
+    PollsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

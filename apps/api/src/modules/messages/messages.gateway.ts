@@ -15,6 +15,7 @@ import type { Redis } from 'ioredis';
 import { Inject } from '@nestjs/common';
 import {
   type MessageDto,
+  type PollAggregate,
   type SocketMessageDeleted,
   type SocketMessageSendAck,
   type SocketPresenceUpdate,
@@ -139,6 +140,13 @@ export class MessagesGateway
 
     // Join this user's own presence room so peers can subscribe to their status.
     await socket.join(presenceRoomFor(claims.sub));
+
+    // Join this user's per-user room (Tranche 2.F polls broadcast personalised
+    // payloads here; Tranche 2.H calls will reuse it for `call:ring` fan-out
+    // across multi-device sessions). The presence room is NOT a substitute:
+    // it also contains peer-subscribers via `presence:request`, so it can't
+    // carry private per-user events.
+    await socket.join(userRoomFor(claims.sub));
 
     // Presence: increment socket count, broadcast `isOnline=true` on the
     // edge from 0→1. Idempotent on reconnect.
@@ -375,6 +383,27 @@ export class MessagesGateway
   emitMessageUnpinned(payload: { chatId: string; messageId: string }): void {
     this.server.to(roomFor(payload.chatId)).emit(SocketEvents.messageUnpinned, payload);
   }
+
+  /**
+   * Broadcast a poll vote / close (Tranche 2.F). Personalised per viewer
+   * because `PollAggregate.options[].votedByMe` is viewer-specific — server
+   * computes one aggregate per chat member and emits to each user's
+   * `user:{userId}` room (joined on connect). For 1-on-1 chats this is 2
+   * emissions; scales linearly with chat size.
+   */
+  emitPollVoted(
+    chatId: string,
+    messageId: string,
+    perViewer: Map<string, PollAggregate>,
+  ): void {
+    for (const [viewerUserId, poll] of perViewer.entries()) {
+      this.server.to(userRoomFor(viewerUserId)).emit(SocketEvents.pollVoted, {
+        chatId,
+        messageId,
+        poll,
+      });
+    }
+  }
 }
 
 function roomFor(chatId: string): string {
@@ -383,6 +412,15 @@ function roomFor(chatId: string): string {
 
 function presenceRoomFor(userId: string): string {
   return `presence:${userId}`;
+}
+
+/**
+ * Per-user room — carries private per-user events (poll-voted in 2.F, call-ring
+ * in 2.H). Distinct from `presence:{userId}` which also has peer-subscribers
+ * for online-status updates and so can't be used for private payloads.
+ */
+function userRoomFor(userId: string): string {
+  return `user:${userId}`;
 }
 
 function presenceKey(userId: string): string {

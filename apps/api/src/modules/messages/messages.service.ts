@@ -23,6 +23,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { buildPage, decodeCursor, encodeCursor } from '../../common/pagination/cursor';
 import { BlocksService } from '../blocks/blocks.service';
 import { MediaService } from '../media/media.service';
+import { loadPollAggregateMap } from '../polls/poll-aggregate';
 
 type MessageCursor = { createdAt: string; id: string };
 
@@ -106,6 +107,12 @@ function buildRowToDto(media: MediaService) {
       // (e.g. `GET /chats/:id/messages`) load reactions in a batched query
       // and call `injectReactions(dtos, aggregates)` to fold them in.
       reactions: [],
+      // Poll aggregate defaults to null. Read paths that need it for POLL
+      // kinds call `injectPolls(dtos, viewerUserId)` (Tranche 2.F) to batch-
+      // load the live aggregate via `loadPollAggregateMap`. Tombstones keep
+      // `poll: null` regardless — the underlying rows survive for audit but
+      // the wire shape hides them, matching how `text` / media are zeroed.
+      poll: null,
     };
   };
 }
@@ -258,8 +265,10 @@ export class MessagesService {
       (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id)
     );
 
+    const dtos = sortedAsc.map(this.rowToDto);
+    await this.injectPolls(dtos, userId);
     return {
-      items: sortedAsc.map(this.rowToDto),
+      items: dtos,
       meta: trimmedPage.meta,
     };
   }
@@ -532,7 +541,50 @@ export class MessagesService {
   }
 
   /**
-   * Shared message-creation tail used by `send` + `forwardInto`: allocate the
+   * Inject `MessageDto.poll` for POLL messages in the supplied list,
+   * personalised for `viewerUserId`. Non-POLL rows are left untouched (`poll`
+   * stays at its `rowToDto` default of `null`). Mutates in place.
+   *
+   * Hot path: batched single Prisma query for every POLL id in `dtos`.
+   *
+   * Used by `list` and by `PollsService.createPoll` / `vote` / `close` to
+   * fold the live aggregate onto the returned `MessageDto` (so callers don't
+   * have to round-trip a second `GET /messages/:id/poll`).
+   */
+  async injectPolls(dtos: MessageDto[], viewerUserId: string): Promise<void> {
+    const pollIds = dtos
+      .filter((d) => d.kind === 'POLL' && d.deletedAt === null)
+      .map((d) => d.id);
+    if (pollIds.length === 0) return;
+    const aggregates = await loadPollAggregateMap(this.prisma, viewerUserId, pollIds);
+    for (const d of dtos) {
+      if (d.kind === 'POLL') {
+        d.poll = aggregates.get(d.id) ?? null;
+      }
+    }
+  }
+
+  /**
+   * Server-authored message create — used by features whose kind sits in
+   * `SERVER_ONLY_KINDS` (Tranche 2.F polls today, Tranche 2.H call events
+   * tomorrow). Bypasses ONLY the kind-allowlist check; the per-chat advisory
+   * lock + sequence allocation + `lastMessageId` bump are identical to
+   * `send()` because both call `allocateAndCreate`.
+   *
+   * `tx` is the caller's existing transaction client — the caller wraps the
+   * message create + its kind-specific child rows (poll_messages, etc.) in
+   * one atomic boundary.
+   */
+  async createServerAuthored(
+    tx: Prisma.TransactionClient,
+    data: Omit<Prisma.MessageUncheckedCreateInput, 'sequence'>,
+  ): Promise<MessageRow> {
+    return this.allocateAndCreate(tx, data);
+  }
+
+  /**
+   * Shared message-creation tail used by `send` + `forwardInto` + (via
+   * `createServerAuthored`) the polls + future calls modules: allocate the
    * per-chat sequence under an advisory lock, create the row, bump the chat's
    * lastMessage pointer + the sender's own read cursor. The caller owns all
    * validation; this just does the locked write.

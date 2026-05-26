@@ -46,6 +46,7 @@ model User {
   starredMessages StarredMessage[] @relation("UserStarredMessages")
   messageReactions MessageReaction[] @relation("UserReactions")
   pinnedMessages  Message[]      @relation("MessagePinnedBy")
+  pollVotes       PollVote[]     @relation("UserPollVotes")
 
   @@index([phoneE164])
   @@map("users")
@@ -309,6 +310,9 @@ model Message {
   reports           MessageReport[] @relation("ReportedMessage")
   stars             StarredMessage[] @relation("MessageStars")
   reactions         MessageReaction[] @relation("MessageReactions")
+  /// Populated on POLL kinds (Tranche 2.F). 1:1 — the `message_id` column on
+  /// `poll_messages` is UNIQUE.
+  pollMessage       PollMessage?     @relation("MessagePoll")
 
   @@unique([senderUserId, clientMessageId])
   @@unique([chatId, sequence])
@@ -485,4 +489,68 @@ model MessageReaction {
   @@unique([messageId, userId, emoji])
   @@index([messageId])
   @@map("message_reactions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Polls (Tranche 2.F — 1-on-1 scope).
+//
+// Three tables back the POLL message kind. `PollMessage` is 1:1 with the
+// underlying `Message` row (server-authored via `MessagesService.createServerAuthored`);
+// options hang off it; each vote is one row in `PollVote` keyed by
+// `(pollMessageId, voterUserId, pollOptionId)` for natural-key idempotency
+// (Prisma P2002 on retry is swallowed by the service).
+//
+// Concurrency: the polls service serialises concurrent votes on the same poll
+// under `pg_advisory_xact_lock(hash(poll_message_id))`. Different polls don't
+// contend, even within the same chat.
+//
+// The schema is intentionally general (single/multi-select, anonymous flag,
+// closed_at) so a future Super Groups BRD can reuse it without a migration.
+// 1-on-1 UI hides the anonymous toggle (zero value with 2 voters).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PollMessage {
+  id          String   @id @default(uuid()) @db.Uuid
+  messageId   String   @unique @db.Uuid @map("message_id")
+  question    String   @db.VarChar(300)
+  anonymous   Boolean  @default(false)
+  multiSelect Boolean  @default(false) @map("multi_select")
+  closedAt    DateTime? @db.Timestamptz(6) @map("closed_at")
+  createdAt   DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+
+  message     Message      @relation("MessagePoll", fields: [messageId], references: [id], onDelete: Cascade)
+  options     PollOption[] @relation("PollMessageOptions")
+  votes       PollVote[]   @relation("PollMessageVotes")
+
+  @@map("poll_messages")
+}
+
+model PollOption {
+  id            String @id @default(uuid()) @db.Uuid
+  pollMessageId String @db.Uuid @map("poll_message_id")
+  ordinal       Int
+  label         String @db.VarChar(120)
+
+  pollMessage   PollMessage @relation("PollMessageOptions", fields: [pollMessageId], references: [id], onDelete: Cascade)
+  votes         PollVote[]  @relation("PollOptionVotes")
+
+  @@unique([pollMessageId, ordinal])
+  @@map("poll_options")
+}
+
+model PollVote {
+  id            String   @id @default(uuid()) @db.Uuid
+  pollMessageId String   @db.Uuid @map("poll_message_id")
+  pollOptionId  String   @db.Uuid @map("poll_option_id")
+  voterUserId   String   @db.Uuid @map("voter_user_id")
+  createdAt     DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+
+  pollMessage   PollMessage @relation("PollMessageVotes", fields: [pollMessageId], references: [id], onDelete: Cascade)
+  pollOption    PollOption  @relation("PollOptionVotes", fields: [pollOptionId], references: [id], onDelete: Cascade)
+  voter         User        @relation("UserPollVotes", fields: [voterUserId], references: [id], onDelete: Cascade)
+
+  @@unique([pollMessageId, voterUserId, pollOptionId])
+  @@index([pollOptionId], map: "poll_votes_by_option_idx")
+  @@index([pollMessageId, voterUserId], map: "poll_votes_by_voter_idx")
+  @@map("poll_votes")
 }

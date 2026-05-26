@@ -7,6 +7,7 @@ export * from './forward.js';
 export * from './media.js';
 export * from './messages.js';
 export * from './pin.js';
+export * from './polls.js';
 export * from './moderation.js';
 export * from './profile-card.js';
 export * from './reactions.js';
