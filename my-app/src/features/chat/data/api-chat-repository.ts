@@ -1278,6 +1278,7 @@ export const apiChatRepository: ChatRepository = {
 
   async setChatTheme(threadId, theme) {
     await apiClient.patch(`/chats/${threadId}/theme`, { theme });
+    notify();
   },
 
   subscribe(listener) {

@@ -4,6 +4,7 @@ import { useEffect, useDeferredValue, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Pressable,
   StyleSheet,
   TextInput,
   View,
@@ -178,9 +179,10 @@ function SearchHitRow({
   // We can't reliably resolve "me" vs counterpart here without extra context, so we
   // always show the time + snippet and leave sender attribution to future work.
   return (
-    <ThemedText
+    <Pressable
       style={[styles.hitRow, { borderBottomColor: theme.divider }]}
-      onPress={() => onPress(hit)}>
+      onPress={() => onPress(hit)}
+      accessibilityRole="button">
       <View style={styles.hitInner}>
         <ThemedText style={[styles.hitSnippet, { color: theme.text }]} numberOfLines={2}>
           {hit.snippet}
@@ -189,7 +191,7 @@ function SearchHitRow({
           {formatThreadRowTime(hit.createdAt)}
         </ThemedText>
       </View>
-    </ThemedText>
+    </Pressable>
   );
 }
 
