@@ -27,6 +27,9 @@ module.exports = {
     // stubbed before the @/ alias expansion so the pattern matches in time.
     '^@/global\\.css$': '<rootDir>/jest-stub-css.js',
     '\\.css$': '<rootDir>/jest-stub-css.js',
+    // react-native is an ESM module that cannot be parsed in the node test env.
+    // theme.ts imports Platform from it; stub with a minimal shim.
+    '^react-native$': '<rootDir>/jest-stub-react-native.js',
     '^@/(.*)$': '<rootDir>/src/$1',
     '^@/assets/(.*)$': '<rootDir>/assets/$1',
     '^@scalechat/shared$': '<rootDir>/../packages/shared/src/index.ts',

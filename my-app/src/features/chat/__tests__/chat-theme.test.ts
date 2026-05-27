@@ -1,48 +1,46 @@
 /**
  * P2-Theme: pure-logic tests for the chat-theme token map.
  *
- * Tests are fully self-contained — no react-native, no MMKV, no @scalechat/shared
- * imports, because those pull in ESM / .js-extension dependencies that break
- * under the Jest node environment (same constraint as poll-vote-math.test.ts,
- * which delegates to a separate pure helper to stay testable).
+ * Imports the REAL Brand.chatThemes from src/constants/theme.ts and the REAL
+ * CHAT_THEMES enum from @scalechat/shared so that any drift between the two
+ * (e.g. a new theme added to the enum but not to the token map, or a hex value
+ * typo) is caught here rather than silently passing against an inline table.
  *
- * The mock-repo setChatTheme behaviour is verified by the inline simulation below
- * rather than by importing mock-chat-repository (which transitively pulls in
- * @scalechat/shared with its .js specifiers).
+ * Import notes:
+ *  - @/constants/theme  → works; CSS stub (jest-stub-css.js) + react-native
+ *    stub (jest-stub-react-native.js) are wired in jest.config.js
+ *    moduleNameMapper.
+ *  - @scalechat/shared/schemas/chat-theme  → imported via the sub-path
+ *    mapper (avoids the barrel index.ts which re-exports with .js specifiers
+ *    that Jest's CJS resolver cannot find without a custom resolver).
  *
- * Keep EXPECTED_TOKENS in sync with Brand.chatThemes in src/constants/theme.ts.
- * Keep EXPECTED_KEYS in sync with ChatThemeEnum in @scalechat/shared.
+ * The mock-repo setChatTheme behaviour is verified by the inline simulation
+ * below (same constraint as before — avoid importing the full repository which
+ * has heavier transitive deps).
  */
 
-/** Expected theme keys — mirror ChatThemeEnum.options. */
-const EXPECTED_KEYS = ['default', 'midnight', 'forest', 'sunset'] as const;
-type ThemeKey = typeof EXPECTED_KEYS[number];
-
-/**
- * Inline expected token map — matches the values in Brand.chatThemes.
- * If the token values change in theme.ts, update this table to keep the test as spec.
- */
-const EXPECTED_TOKENS: Record<ThemeKey, { body: string; mine: string; theirs: string; mineText: string; theirsText: string }> = {
-  default:  { body: '#000000', mine: '#5360EC', theirs: '#EDEDED', mineText: '#EDEDED', theirsText: '#313131' },
-  midnight: { body: '#0D1117', mine: '#1F6FEB', theirs: '#C9D1D9', mineText: '#FFFFFF', theirsText: '#111827' },
-  forest:   { body: '#0D1F1A', mine: '#2D6A4F', theirs: '#D8F3DC', mineText: '#FFFFFF', theirsText: '#1B4332' },
-  sunset:   { body: '#1A0D0D', mine: '#AE2012', theirs: '#FFE8D6', mineText: '#FFFFFF', theirsText: '#6B1010' },
-};
+import { Brand } from '@/constants/theme';
+import { CHAT_THEMES } from '@scalechat/shared/schemas/chat-theme';
 
 // ─── Token map structure tests ────────────────────────────────────────────────
 
-describe('Brand.chatThemes token map (spec table)', () => {
-  it('covers every expected ChatTheme key including default', () => {
-    const keys = Object.keys(EXPECTED_TOKENS);
-    for (const k of EXPECTED_KEYS) {
-      expect(keys).toContain(k);
+describe('Brand.chatThemes token map (real import)', () => {
+  const hexRe = /^#[0-9a-fA-F]{3,8}$/;
+
+  it('has a "default" entry', () => {
+    expect(Brand.chatThemes).toHaveProperty('default');
+  });
+
+  it('has an entry for every value in CHAT_THEMES', () => {
+    for (const key of CHAT_THEMES) {
+      expect(Brand.chatThemes).toHaveProperty(key);
     }
   });
 
   it('each entry has body, mine, theirs, mineText, theirsText hex strings', () => {
-    const hexRe = /^#[0-9a-fA-F]{3,8}$/;
-    for (const key of EXPECTED_KEYS) {
-      const token = EXPECTED_TOKENS[key];
+    const allKeys = ['default', ...CHAT_THEMES.filter((k) => k !== 'default')];
+    for (const key of allKeys) {
+      const token = Brand.chatThemes[key as keyof typeof Brand.chatThemes];
       expect(token.body).toMatch(hexRe);
       expect(token.mine).toMatch(hexRe);
       expect(token.theirs).toMatch(hexRe);
@@ -51,20 +49,31 @@ describe('Brand.chatThemes token map (spec table)', () => {
     }
   });
 
-  it('default body matches Brand.chatBody (#000000)', () => {
-    expect(EXPECTED_TOKENS.default.body).toBe('#000000');
+  it('default.body === Brand.chatBody', () => {
+    expect(Brand.chatThemes.default.body).toBe(Brand.chatBody);
   });
 
-  it('default mine/theirs match existing Brand bubble tokens', () => {
-    // Brand.chatBubbleMine = '#5360EC', Brand.chatBubbleTheirs = '#EDEDED'
-    expect(EXPECTED_TOKENS.default.mine).toBe('#5360EC');
-    expect(EXPECTED_TOKENS.default.theirs).toBe('#EDEDED');
+  it('default.mine === Brand.chatBubbleMine', () => {
+    expect(Brand.chatThemes.default.mine).toBe(Brand.chatBubbleMine);
+  });
+
+  it('default.theirs === Brand.chatBubbleTheirs', () => {
+    expect(Brand.chatThemes.default.theirs).toBe(Brand.chatBubbleTheirs);
+  });
+
+  it('default.mineText === Brand.chatBubbleMineText', () => {
+    expect(Brand.chatThemes.default.mineText).toBe(Brand.chatBubbleMineText);
+  });
+
+  it('default.theirsText === Brand.chatBubbleTheirsText', () => {
+    expect(Brand.chatThemes.default.theirsText).toBe(Brand.chatBubbleTheirsText);
   });
 
   it('non-default themes have dark body colors (intentionally dark-palette)', () => {
-    for (const key of EXPECTED_KEYS) {
+    for (const key of CHAT_THEMES) {
       if (key === 'default') continue;
-      const hex = EXPECTED_TOKENS[key].body.slice(1);
+      const token = Brand.chatThemes[key as keyof typeof Brand.chatThemes];
+      const hex = token.body.slice(1);
       const r = parseInt(hex.slice(0, 2), 16);
       const g = parseInt(hex.slice(2, 4), 16);
       const b = parseInt(hex.slice(4, 6), 16);
@@ -76,7 +85,7 @@ describe('Brand.chatThemes token map (spec table)', () => {
 
 // ─── Mock setChatTheme logic simulation ───────────────────────────────────────
 // We simulate the exact same in-memory logic that mockChatRepository.setChatTheme
-// implements, without importing the repo (avoids @scalechat/shared .js specifier issue).
+// implements, without importing the repo (avoids heavier transitive deps).
 
 type MinimalThread = { id: string; chatTheme?: string | null };
 
@@ -114,11 +123,11 @@ describe('setChatTheme logic (mock repo simulation)', () => {
     expect(repo.getThread('t2')?.chatTheme ?? null).not.toBe('sunset');
   });
 
-  it('default fallback: themeToken.body matches default.body when chatTheme is null', () => {
+  it('default fallback: themeToken.body matches Brand.chatThemes.default.body when chatTheme is null', () => {
     // Mirrors the themeToken derivation in chat/[id].tsx:
     // Brand.chatThemes[thread?.chatTheme ?? 'default'] ?? Brand.chatThemes.default
     const chatTheme: string | null = null;
-    const key = (chatTheme ?? 'default') as ThemeKey;
-    expect(EXPECTED_TOKENS[key].body).toBe(EXPECTED_TOKENS.default.body);
+    const key = (chatTheme ?? 'default') as keyof typeof Brand.chatThemes;
+    expect(Brand.chatThemes[key].body).toBe(Brand.chatThemes.default.body);
   });
 });
