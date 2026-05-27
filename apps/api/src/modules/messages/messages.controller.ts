@@ -20,6 +20,7 @@ import {
   SendMessageSchema,
   type ChatDetailDto,
   type ChatMediaListQuery,
+  type ChatStorageSummary,
   type MessageDeleteScope,
   type MessageDto,
   type MessageListQuery,
@@ -97,6 +98,19 @@ export class MessagesController {
     @Query(new ZodValidationPipe(ChatMediaListQuerySchema)) query: ChatMediaListQuery,
   ): Promise<MessageListResponse> {
     return this.messages.listMedia(user.sub, chatId, query);
+  }
+
+  /**
+   * `GET /chats/:chatId/storage`
+   * Per-chat storage summary — total bytes + per-kind breakdown.
+   * Member-gated; returns 403 `not_a_member` for non-members.
+   */
+  @Get('storage')
+  getChatStorage(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('chatId', new ParseUUIDPipe({ version: '4' })) chatId: string,
+  ): Promise<ChatStorageSummary> {
+    return this.messages.getChatStorage(user.sub, chatId);
   }
 
   @Post('messages')

@@ -4,6 +4,7 @@ import { SERVER_ONLY_KINDS } from '@scalechat/shared';
 import type {
   ChatDetailDto,
   ChatMediaListQuery,
+  ChatStorageSummary,
   MediaUploadKind,
   MessageDeleteScope,
   MessageDto,
@@ -112,6 +113,7 @@ type MessageRow = {
   contactPhoneE164: string | null;
   documentTitle: string | null;
   documentSizeBytes: bigint | null;
+  mediaSizeBytes: bigint | null;
   forwardedFromMessageId: string | null;
   forwardCount: number;
   pinnedAt: Date | null;
@@ -602,6 +604,11 @@ export class MessagesService {
           body.kind === 'DOCUMENT' && body.documentSizeBytes !== undefined
             ? BigInt(body.documentSizeBytes)
             : null,
+        // Unified media size — populated for all MEDIA_BACKED_KINDS on send.
+        mediaSizeBytes:
+          MEDIA_BACKED_KINDS.has(body.kind) && body.mediaSizeBytes !== undefined
+            ? BigInt(body.mediaSizeBytes)
+            : null,
         replyToMessageId: body.replyToMessageId ?? null,
       });
       return rowToDto(created);
@@ -664,6 +671,7 @@ export class MessagesService {
         contactPhoneE164: source.contactPhoneE164,
         documentTitle: source.documentTitle,
         documentSizeBytes: source.documentSizeBytes,
+        mediaSizeBytes: source.mediaSizeBytes,
         forwardedFromMessageId: source.id,
         replyToMessageId: null,
       });
@@ -693,6 +701,51 @@ export class MessagesService {
         d.poll = aggregates.get(d.id) ?? null;
       }
     }
+  }
+
+  /**
+   * Per-chat storage summary — `GET /chats/:chatId/storage`.
+   *
+   * Member-gated: 403 `not_a_member` if the caller isn't an active member.
+   *
+   * Aggregates non-tombstoned message rows using the unified `mediaSizeBytes`
+   * column (populated from Tranche P2-Storage onward) with a COALESCE fallback
+   * to `documentSizeBytes` for pre-existing DOCUMENT rows. TEXT / SYSTEM /
+   * LOCATION / CONTACT_CARD rows contribute 0 bytes but are counted in
+   * `perKind` so the caller can show "N text messages".
+   *
+   * BigInt sums are returned as decimal strings so they survive the JSON
+   * boundary without precision loss.
+   */
+  async getChatStorage(userId: string, chatId: string): Promise<ChatStorageSummary> {
+    await this.assertMember(userId, chatId);
+
+    type RawRow = { kind: string; count: bigint; totalBytes: bigint };
+    const rows = await this.prisma.$queryRaw<RawRow[]>`
+      SELECT
+        kind,
+        COUNT(*)::bigint                                             AS count,
+        SUM(COALESCE("mediaSizeBytes", "documentSizeBytes", 0))::bigint AS "totalBytes"
+      FROM messages
+      WHERE "chatId" = ${chatId}::uuid
+        AND "deletedAt" IS NULL
+      GROUP BY kind
+    `;
+
+    let grandTotal = 0n;
+    const perKind = rows.map((r) => {
+      grandTotal += r.totalBytes;
+      return {
+        kind: r.kind as import('@scalechat/shared').MessageKind,
+        count: Number(r.count),
+        totalBytes: r.totalBytes.toString(),
+      };
+    });
+
+    return {
+      perKind,
+      totalBytes: grandTotal.toString(),
+    };
   }
 
   /**
