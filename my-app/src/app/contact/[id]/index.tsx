@@ -252,7 +252,14 @@ export default function ContactProfileScreen() {
             <OptionRow
               icon="hard-drive"
               label={PROFILE_OPTION_ROW_LABELS[3]}
-              onPress={() => setSheet('manageStorage')}
+              onPress={() =>
+                card.commonChatId
+                  ? router.push({
+                      pathname: '/contact/[id]/storage',
+                      params: { id: card.id, chatId: card.commonChatId },
+                    })
+                  : setSheet('manageStorage')
+              }
             />
             <OptionRow
               icon="lock"
