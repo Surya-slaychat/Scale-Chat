@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { ChatThemeEnum } from './chat-theme.js';
 import { paginatedResponse } from './common.js';
 import { PollAggregateSchema } from './polls.js';
 import { ReactionAggregateSchema } from './reactions.js';
@@ -454,5 +455,10 @@ export const ChatDetailSchema = z.object({
    * Known Limitations #1.
    */
   counterpartLastReadSequence: z.string().regex(/^\d+$/).nullable(),
+  /**
+   * Per-user per-chat theme override (P2-Theme). Null = default theme.
+   * Values: 'default' | 'midnight' | 'forest' | 'sunset'.
+   */
+  chatTheme: ChatThemeEnum.nullable().default(null),
 });
 export type ChatDetailDto = z.infer<typeof ChatDetailSchema>;
