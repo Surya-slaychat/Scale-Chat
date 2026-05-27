@@ -6,6 +6,7 @@ export * from './common.js';
 export * from './contacts.js';
 export * from './forward.js';
 export * from './media.js';
+export * from './message-search.js';
 export * from './messages.js';
 export * from './pin.js';
 export * from './polls.js';
