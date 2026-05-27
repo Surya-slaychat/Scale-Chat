@@ -255,6 +255,19 @@ export const ChatCopy = {
     },
   },
 
+  /** Per-chat theme picker (P2-Theme). */
+  theme: {
+    /** Modal title shown in the picker sheet. */
+    pickerTitle: 'Chat theme',
+    /** Display names for each theme value (KEEP IN SYNC WITH ChatThemeEnum). */
+    nameDefault: 'Default',
+    nameMidnight: 'Midnight',
+    nameForest: 'Forest',
+    nameSunset: 'Sunset',
+    /** Alert shown when the server rejects the theme change. */
+    applyFailed: 'Could not apply theme. Please try again.',
+  },
+
   /** Voice/Video call UI (Tranche 2.I). */
   calls: {
     incomingVoice: 'Incoming voice call',

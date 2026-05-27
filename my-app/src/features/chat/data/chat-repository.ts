@@ -205,6 +205,13 @@ export interface ChatRepository {
    * (heaviest kind first) + grand-total `totalBytes` (BigInt-as-string).
    */
   getChatStorage?(chatId: string): Promise<ChatStorageSummary>;
+  /**
+   * Set (or reset) the per-user per-chat theme (P2-Theme).
+   * `PATCH /chats/:chatId/theme { theme: ChatTheme | null }`.
+   * `null` resets to the default. 400 `unknown_theme` if the value isn't in
+   * `CHAT_THEMES`; 404 if the user is not a member.
+   */
+  setChatTheme?(threadId: string, theme: string | null): Promise<void>;
   /** Subscribe to repository changes (any thread/message update). */
   subscribe(listener: () => void): () => void;
 }

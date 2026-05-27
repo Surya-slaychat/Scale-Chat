@@ -744,6 +744,18 @@ export const mockChatRepository: ChatRepository = {
     return { perKind, totalBytes };
   },
 
+  // ─── Theme (P2-Theme) ────────────────────────────────────────────────────────
+  // In-memory map keyed by threadId. `getThread` returns the patched theme so
+  // the thread screen can read it back after an optimistic apply. `null` resets.
+  async setChatTheme(threadId, theme) {
+    await sleep();
+    const s = getState();
+    s.threads = s.threads.map((t) =>
+      t.id === threadId ? { ...t, chatTheme: theme } : t,
+    );
+    persist();
+  },
+
   subscribe(listener) {
     listeners.add(listener);
     return () => {

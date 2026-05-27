@@ -281,6 +281,7 @@ function detailToThread(detail: ChatDetailDto, last?: MessageDto): Thread {
     lastMessage: last ? dtoToMessage(last, counterpart.id) : fallbackMessage,
     unreadCount: 0,
     lastReadSequence: Number(detail.lastReadSequence),
+    chatTheme: detail.chatTheme ?? null,
   };
 }
 
@@ -1273,6 +1274,10 @@ export const apiChatRepository: ChatRepository = {
 
   async getChatStorage(chatId) {
     return apiClient.get<ChatStorageSummary>(`/chats/${chatId}/storage`);
+  },
+
+  async setChatTheme(threadId, theme) {
+    await apiClient.patch(`/chats/${threadId}/theme`, { theme });
   },
 
   subscribe(listener) {
