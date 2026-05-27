@@ -170,6 +170,29 @@ export const ChatCopy = {
     },
   },
 
+  /**
+   * Contact Profile v2 (Figma 1:3877) — coming-soon sheet titles/bodies
+   * for affordances not yet wired, plus the clear-chat confirm dialog.
+   */
+  profile: {
+    /** Per-chat search — sheet title + body. */
+    searchTitle: 'Search coming soon',
+    searchBody: 'Search through messages in this chat. We\'re putting the finishing touches on it.',
+    /** Chat theme / wallpaper — sheet title + body. */
+    chatThemeTitle: 'Chat themes coming soon',
+    chatThemeBody: 'Pick a custom wallpaper or colour theme just for this conversation.',
+    /** Manage storage — sheet title + body. */
+    manageStorageTitle: 'Storage manager coming soon',
+    manageStorageBody: 'Review and delete media to free up space on your device.',
+    /** Privacy settings — sheet title + body. */
+    privacyTitle: 'Privacy settings coming soon',
+    privacyBody: 'Control what this contact can see — profile photo, last seen, status updates.',
+    /** Clear chat confirm — title, body, and CTA. */
+    clearChatConfirmTitle: 'Clear this chat?',
+    clearChatConfirmBody: 'All messages will be removed from your device. Your contact will still have their copy.',
+    clearChatCta: 'Clear chat',
+  },
+
   /** Voice/Video call UI (Tranche 2.I). */
   calls: {
     incomingVoice: 'Incoming voice call',
