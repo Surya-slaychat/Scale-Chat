@@ -7,10 +7,18 @@
 | Phase | State | Notes |
 |---|---|---|
 | **P1 — redesign + wire existing** | ✅ **Landed 2026-05-27** | Mobile-only. Branch `feat/profile-page-v2`. |
-| P2-Search (in-chat message search) | ⬜ Pending | Backend `GET /chats/:id/messages/search` + search overlay |
-| P2-Storage (manage storage) | ⬜ Pending | Migration `mediaSizeBytes` + `GET /chats/:id/storage` + screen |
-| P2-Theme (per-chat theme) | ⬜ Pending | Migration `ChatMember.chatTheme` + `PATCH /chats/:id/theme` + picker (themes bubbles too) |
-| P2-Privacy (privacy sub-screen) | ⬜ Pending | Mobile-only; Block/Encryption/Disappearing-placeholder |
+| **P2-Search (in-chat message search)** | ✅ **Landed 2026-05-27** | `GET /chats/:id/messages/search` (6 e2e) + search overlay + scroll-to-hit |
+| **P2-Storage (manage storage)** | ✅ **Landed 2026-05-27** | Migration `mediaSizeBytes` + `GET /chats/:id/storage` (4 e2e) + Manage Storage screen (free-up-space = confirm+stub) |
+| **P2-Theme (per-chat theme)** | ✅ **Landed 2026-05-27** | Migration `ChatMember.chatTheme` + `PATCH /chats/:id/theme` (5 e2e) + picker; themes thread bg **and** bubbles |
+| **P2-Privacy (privacy sub-screen)** | ✅ **Landed 2026-05-27** | Mobile-only; Block/Encryption/Disappearing-placeholder + focus-resync of block state |
+
+**Full-suite verification (2026-05-27):** backend `npm run api:test:e2e` → **68 passed** / 6 pre-existing todo (7 suites); mobile `npm test` → **160 passed** / 2 skipped (14 suites). 2 dev-DB migrations applied + `prisma migrate status` in sync. Each slice landed via implementer → spec review → quality review → fix round.
+
+### Known minor debt
+- Mobile test harness gained a `react-native` → minimal stub + CSS stub in `jest.config.js` so pure-logic tests can import `theme.ts` (which imports `@/global.css` + `Platform`). Consistent with the project's no-RN-render test philosophy; a future component-rendering test would need the `jest-expo` preset instead.
+- "Free up space" (Storage) is a confirm + stub — real per-chat device-cache eviction is deferred (SDK 56 has no per-chat cache-clear API; server media is shared/ref-counted).
+- In-chat search scroll-to-hit handles in-window messages only; jumping to a hit older than the loaded page is deferred (lands at the thread without scroll).
+- Privacy mock-repo Jest cases are `describe.skip` (MMKV-under-Jest limitation, same as other repo suites); copy assertions are live.
 
 ## P1 — what landed (2026-05-27)
 
