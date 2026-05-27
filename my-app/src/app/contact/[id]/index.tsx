@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { Brand, FontWeight, Radius, Spacing } from '@/constants/theme';
 import { Avatar } from '@/features/chat/components/avatar';
+import { ChatThemePicker } from '@/features/chat/components/chat-theme-picker';
 import { ComingSoonSheet } from '@/features/chat/components/coming-soon-sheet';
 import { MutePickerSheet } from '@/features/chat/components/mute-picker-sheet';
 import { ProfileActionTile } from '@/features/chat/components/profile-action-tile';
@@ -81,6 +82,10 @@ export default function ContactProfileScreen() {
 
   // Local mute state — profile-card DTO has no mute field; defaults false.
   const [isMuted, setIsMuted] = useState(false);
+
+  // P2-Theme: track active theme for the picker's checkmark highlight.
+  const [chatTheme, setChatThemeLocal] = useState<string | null>(null);
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
 
   // Local block state shadows card.isBlocked for optimistic toggles.
   const [isBlocked, setIsBlocked] = useState<boolean>(false);
@@ -216,6 +221,18 @@ export default function ContactProfileScreen() {
     );
   }
 
+  async function handleSetTheme(theme: string | null) {
+    if (!card?.commonChatId) return;
+    const prev = chatTheme;
+    setChatThemeLocal(theme);
+    try {
+      await chatRepository.setChatTheme?.(card.commonChatId, theme);
+    } catch {
+      setChatThemeLocal(prev);
+      Alert.alert(ChatCopy.theme.applyFailed, '');
+    }
+  }
+
   // NOTE: useMemo MUST sit above the loading/error early-returns (rules-of-hooks).
   type SectionItem = { key: string; render: () => React.ReactElement };
   const sectionsData = useMemo<SectionItem[]>(() => {
@@ -241,7 +258,9 @@ export default function ContactProfileScreen() {
             <OptionRow
               icon="droplet"
               label={PROFILE_OPTION_ROW_LABELS[1]}
-              onPress={() => setSheet('chatTheme')}
+              onPress={() =>
+                card.commonChatId ? setThemePickerOpen(true) : setSheet('chatTheme')
+              }
             />
             <OptionRow
               icon="bell"
@@ -432,13 +451,21 @@ export default function ContactProfileScreen() {
         onClose={() => setSheet(null)}
       />
 
-      {/* Chat Theme coming soon */}
+      {/* Chat Theme coming soon — fallback when no commonChatId */}
       <ComingSoonSheet
         visible={sheet === 'chatTheme'}
         icon="droplet"
         title={ChatCopy.profile.chatThemeTitle}
         body={ChatCopy.profile.chatThemeBody}
         onClose={() => setSheet(null)}
+      />
+
+      {/* Chat Theme picker — shown when commonChatId is available (P2-Theme) */}
+      <ChatThemePicker
+        visible={themePickerOpen}
+        currentTheme={chatTheme}
+        onSelect={(theme) => void handleSetTheme(theme)}
+        onClose={() => setThemePickerOpen(false)}
       />
 
       {/* Manage Storage coming soon */}
