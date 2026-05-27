@@ -150,6 +150,10 @@ export const Brand = {
   /** Voice playback progress fill (lime for played, muted for unplayed). */
   chatVoicePlayed: '#B3EF2B',
   chatVoiceUnplayed: 'rgba(237,237,237,0.45)',
+  /** Contact Profile v2 (Figma 1:3877). */
+  profileBg: '#09080e',
+  profileBackCircle: '#d7daff',
+  destructiveRed: '#ff2a2d',
 } as const;
 
 export type BrandColor = keyof typeof Brand;
