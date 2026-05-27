@@ -21,6 +21,13 @@ import { MutePickerSheet } from '@/features/chat/components/mute-picker-sheet';
 import { ProfileActionTile } from '@/features/chat/components/profile-action-tile';
 import { ChatCopy } from '@/features/chat/copy';
 import { chatRepository } from '@/features/chat/data';
+import {
+  PROFILE_CLEAR_CHAT_LABEL,
+  PROFILE_OPTION_ROW_LABELS,
+  PROFILE_SECTION_KEYS,
+  profileBlockLabel,
+} from '@/features/chat/profile-rows';
+import type { Contact as ChatContact } from '@/features/chat/types';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError } from '@/lib/api-client';
 import { ensureCallPermissions } from '@/lib/call-permissions';
@@ -29,8 +36,6 @@ import { formatIndianMobile, localDigitsFromE164 } from '@/lib/phone';
 function formatProfilePhone(e164: string): string {
   return formatIndianMobile(localDigitsFromE164(e164));
 }
-
-import type { Contact as ChatContact } from '@/features/chat/types';
 
 type SheetKind = 'notifications' | 'search' | 'manageStorage' | 'chatTheme' | 'privacy' | null;
 
@@ -218,12 +223,12 @@ export default function ContactProfileScreen() {
 
     return [
       {
-        key: 'options',
+        key: PROFILE_SECTION_KEYS[0],
         render: () => (
           <Section>
             <OptionRow
               icon="image"
-              label="Media, Links & Docs"
+              label={PROFILE_OPTION_ROW_LABELS[0]}
               onPress={() =>
                 card.commonChatId
                   ? router.push({
@@ -235,42 +240,42 @@ export default function ContactProfileScreen() {
             />
             <OptionRow
               icon="droplet"
-              label="Chat Theme"
+              label={PROFILE_OPTION_ROW_LABELS[1]}
               onPress={() => setSheet('chatTheme')}
             />
             <OptionRow
               icon="bell"
-              label="Notifications"
+              label={PROFILE_OPTION_ROW_LABELS[2]}
               disabled={!card.commonChatId}
               onPress={() => setSheet('notifications')}
             />
             <OptionRow
               icon="hard-drive"
-              label="Manage Storage"
+              label={PROFILE_OPTION_ROW_LABELS[3]}
               onPress={() => setSheet('manageStorage')}
             />
             <OptionRow
               icon="lock"
-              label="Privacy"
+              label={PROFILE_OPTION_ROW_LABELS[4]}
               onPress={() => setSheet('privacy')}
             />
           </Section>
         ),
       },
       {
-        key: 'destructive',
+        key: PROFILE_SECTION_KEYS[1],
         render: () => (
           <Section>
             <OptionRow
               icon="trash-2"
-              label="Clear Chat"
+              label={PROFILE_CLEAR_CHAT_LABEL}
               destructive
               disabled={!card.commonChatId}
               onPress={() => void handleClearChat()}
             />
             <OptionRow
               icon="slash"
-              label={isBlocked ? 'Unblock' : 'Block'}
+              label={profileBlockLabel(isBlocked)}
               destructive
               onPress={() => void handleToggleBlock()}
             />
@@ -467,6 +472,9 @@ function OptionRow({
   return (
     <Pressable
       onPress={disabled ? undefined : onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={disabled ? { disabled: true } : undefined}
       style={({ pressed }: { pressed: boolean }) => [
         styles.row,
         { borderBottomColor: theme.divider },
@@ -489,7 +497,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
-    paddingHorizontal: 24,
+    paddingHorizontal: Spacing.four,
   },
   topBar: {
     flexDirection: 'row',
@@ -508,8 +516,8 @@ const styles = StyleSheet.create({
   },
   banner: {
     minHeight: 179,
-    borderBottomLeftRadius: 18,
-    borderBottomRightRadius: 18,
+    borderBottomLeftRadius: Radius.bubble,
+    borderBottomRightRadius: Radius.bubble,
     paddingBottom: Spacing.four,
   },
   bannerNameBlock: {
