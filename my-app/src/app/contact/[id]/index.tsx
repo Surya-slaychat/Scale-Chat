@@ -1,6 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import type { UserProfileCard } from '@scalechat/shared';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -38,7 +39,7 @@ function formatProfilePhone(e164: string): string {
   return formatIndianMobile(localDigitsFromE164(e164));
 }
 
-type SheetKind = 'notifications' | 'search' | 'manageStorage' | 'chatTheme' | 'privacy' | null;
+type SheetKind = 'notifications' | 'search' | 'manageStorage' | 'chatTheme' | null;
 
 /**
  * Contact Profile screen v2 — Figma `1:3877`.
@@ -124,6 +125,21 @@ export default function ContactProfileScreen() {
       cancelled = true;
     };
   }, [id]);
+
+  // Re-sync block state when returning from the Privacy sub-screen so the
+  // profile footer label (Block ↔ Unblock) reflects any toggle made there.
+  useFocusEffect(
+    useCallback(() => {
+      if (!card) return;
+      const fn = chatRepository.getProfileCard;
+      if (!fn) return;
+      void fn.call(chatRepository, card.id).then((updated) => {
+        setIsBlocked(updated.isBlocked);
+      }).catch(() => {
+        // Silently ignore — the local state stays as-is.
+      });
+    }, [card]),
+  );
 
   const handleBack = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -283,7 +299,16 @@ export default function ContactProfileScreen() {
             <OptionRow
               icon="lock"
               label={PROFILE_OPTION_ROW_LABELS[4]}
-              onPress={() => setSheet('privacy')}
+              onPress={() =>
+                router.push({
+                  pathname: '/contact/[id]/privacy',
+                  params: {
+                    id: card.id,
+                    contactName: card.fullName,
+                    isBlocked: String(isBlocked),
+                  },
+                })
+              }
             />
           </Section>
         ),
@@ -477,14 +502,6 @@ export default function ContactProfileScreen() {
         onClose={() => setSheet(null)}
       />
 
-      {/* Privacy coming soon */}
-      <ComingSoonSheet
-        visible={sheet === 'privacy'}
-        icon="lock"
-        title={ChatCopy.profile.privacyTitle}
-        body={ChatCopy.profile.privacyBody}
-        onClose={() => setSheet(null)}
-      />
     </View>
   );
 }
