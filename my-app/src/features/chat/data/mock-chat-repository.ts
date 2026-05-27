@@ -4,7 +4,9 @@ import type {
   CallKind,
   CallSummary,
   CallTokenResponse,
+  ChatStorageSummary,
   DevicePlatform,
+  MessageKind,
   MessageSearchPage,
 } from '@scalechat/shared';
 
@@ -699,6 +701,47 @@ export const mockChatRepository: ChatRepository = {
     // Delegate pure search logic to the standalone helper so it's unit-testable
     // without dragging in MMKV / native modules / @scalechat/shared value imports.
     return searchMessagesImpl(all, q, opts) as MessageSearchPage;
+  },
+
+  /**
+   * Aggregate storage for a chat from the in-memory message snapshot (P2-Storage).
+   *
+   * Maps mock `type` → `MessageKind` (contact → CONTACT_CARD, others uppercase).
+   * Sums `sizeBytes` where present (DOCUMENT), `0` otherwise (media sizes aren't
+   * tracked in the mock because the seed uses local `file://` URIs whose sizes are
+   * never fetched). Excludes deleted messages. Returned in `totalBytes DESC` order.
+   */
+  async getChatStorage(chatId): Promise<ChatStorageSummary> {
+    await sleep();
+    const s = getState();
+    const all = s.messagesByThread[chatId] ?? [];
+
+    // Map from mock domain type to MessageKind.
+    function typeToKind(type: string): MessageKind {
+      if (type === 'contact') return 'CONTACT_CARD';
+      if (type === 'call_event') return 'CALL_EVENT';
+      return type.toUpperCase() as MessageKind;
+    }
+
+    const byKind = new Map<MessageKind, { count: number; bytes: number }>();
+    for (const msg of all) {
+      if (msg.deletedAt) continue;
+      const kind = typeToKind(msg.type);
+      const bytes = msg.type === 'document' ? (msg.sizeBytes ?? 0) : 0;
+      const prev = byKind.get(kind) ?? { count: 0, bytes: 0 };
+      byKind.set(kind, { count: prev.count + 1, bytes: prev.bytes + bytes });
+    }
+
+    const perKind = Array.from(byKind.entries())
+      .map(([kind, { count, bytes }]) => ({
+        kind,
+        count,
+        totalBytes: String(bytes),
+      }))
+      .sort((a, b) => Number(BigInt(b.totalBytes) - BigInt(a.totalBytes)));
+
+    const totalBytes = String(perKind.reduce((sum, r) => sum + Number(r.totalBytes), 0));
+    return { perKind, totalBytes };
   },
 
   subscribe(listener) {

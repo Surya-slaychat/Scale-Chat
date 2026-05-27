@@ -4,6 +4,7 @@ import type {
   CallKind,
   CallSummary,
   CallTokenResponse,
+  ChatStorageSummary,
   ClearChatResponse,
   CommonGroupsListResponse,
   DevicePlatform,
@@ -198,6 +199,12 @@ export interface ChatRepository {
     q: string,
     opts?: { cursor?: string; limit?: number },
   ): Promise<MessageSearchPage>;
+  /**
+   * Summarise media storage for a chat (P2-Storage).
+   * `GET /chats/:chatId/storage` → `ChatStorageSummary` with `perKind` rows
+   * (heaviest kind first) + grand-total `totalBytes` (BigInt-as-string).
+   */
+  getChatStorage?(chatId: string): Promise<ChatStorageSummary>;
   /** Subscribe to repository changes (any thread/message update). */
   subscribe(listener: () => void): () => void;
 }
