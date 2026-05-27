@@ -8,6 +8,8 @@ import type {
   MessageDeleteScope,
   MessageDto,
   MessageListResponse,
+  MessageSearchHit,
+  MessageSearchPage,
   SendMessageBody,
 } from '@scalechat/shared';
 
@@ -31,6 +33,41 @@ function isMessageCursor(raw: unknown): raw is MessageCursor {
   if (!raw || typeof raw !== 'object') return false;
   const r = raw as Record<string, unknown>;
   return typeof r.createdAt === 'string' && typeof r.id === 'string';
+}
+
+// ─── Search cursor ────────────────────────────────────────────────────────────
+
+type SearchCursor = { sequence: string };
+
+function isSearchCursor(raw: unknown): raw is SearchCursor {
+  if (!raw || typeof raw !== 'object') return false;
+  const r = raw as Record<string, unknown>;
+  return typeof r.sequence === 'string' && /^\d+$/.test(r.sequence);
+}
+
+/**
+ * Build a short snippet centred on the first case-insensitive occurrence of
+ * `q` in `text`. Returns at most ~20 chars before and after the match, with
+ * ellipsis trimming at the boundaries.
+ *
+ * Called only for rows where `text` is non-null (tombstones are excluded by
+ * the `deletedAt: null` filter before this is reached).
+ */
+function buildSnippet(text: string, q: string): string {
+  const WINDOW = 20;
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx === -1) {
+    // Shouldn't happen (Postgres already matched this row), but fall back to
+    // the start of the text.
+    return text.length > WINDOW * 2 + q.length
+      ? `${text.slice(0, WINDOW * 2 + q.length)}…`
+      : text;
+  }
+  const start = Math.max(0, idx - WINDOW);
+  const end = Math.min(text.length, idx + q.length + WINDOW);
+  const prefix = start > 0 ? '…' : '';
+  const suffix = end < text.length ? '…' : '';
+  return `${prefix}${text.slice(start, end)}${suffix}`;
 }
 
 type MessageRow = {
@@ -317,6 +354,84 @@ export class MessagesService {
     return {
       items: sortedAsc.map(this.rowToDto),
       meta: trimmedPage.meta,
+    };
+  }
+
+  /**
+   * Full-text search over message text within a single chat.
+   *
+   * Results are ordered by sequence DESC (newest first) so the client can
+   * display the most recent matches at the top, and cursor-paginated using the
+   * sequence number as the keyset key.
+   *
+   * Filtering:
+   *   - `deletedAt: null`  — tombstones never surface.
+   *   - `clearedAt` guard  — mirrors the `list` path: messages created at or
+   *     before the caller's personal clear timestamp are hidden.
+   *   - `text: { contains: q, mode: 'insensitive' }` — case-insensitive
+   *     substring search. We deliberately do NOT add `kind: 'TEXT'` — the
+   *     `text` filter on a nullable column already excludes non-text rows
+   *     (null does not contain any string), and this keeps future
+   *     caption-bearing kinds (e.g. image captions) searchable without a
+   *     schema change.
+   *
+   * // pg_trgm GIN index is the scale follow-up (CREATE INDEX ON messages
+   * // USING gin(text gin_trgm_ops) WHERE deleted_at IS NULL).
+   */
+  async searchMessages(
+    userId: string,
+    chatId: string,
+    q: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<MessageSearchPage> {
+    const member = await this.loadMemberOrThrow(userId, chatId);
+
+    const clearedFilter = member.clearedAt
+      ? { createdAt: { gt: member.clearedAt } }
+      : {};
+
+    const c = decodeCursor(cursor, isSearchCursor);
+
+    const rows = await this.prisma.message.findMany({
+      where: {
+        chatId,
+        deletedAt: null,
+        text: { contains: q, mode: 'insensitive' },
+        ...clearedFilter,
+        ...(c ? { sequence: { lt: BigInt(c.sequence) } } : {}),
+      },
+      orderBy: { sequence: 'desc' },
+      take: limit + 1,
+      select: {
+        id: true,
+        sequence: true,
+        text: true,
+        createdAt: true,
+        senderUserId: true,
+      },
+    });
+
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+
+    const items: MessageSearchHit[] = pageRows.map((r) => ({
+      messageId: r.id,
+      sequence: r.sequence.toString(),
+      snippet: buildSnippet(r.text ?? '', q),
+      createdAt: r.createdAt.toISOString(),
+      senderUserId: r.senderUserId,
+    }));
+
+    const lastRow = pageRows[pageRows.length - 1];
+    const nextCursor =
+      hasMore && lastRow
+        ? encodeCursor<SearchCursor>({ sequence: lastRow.sequence.toString() })
+        : null;
+
+    return {
+      items,
+      meta: { nextCursor, hasMore },
     };
   }
 

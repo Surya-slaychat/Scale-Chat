@@ -16,6 +16,7 @@ import {
   MessageDeleteScopeSchema,
   MessageListQuerySchema,
   MessageSchema,
+  MessageSearchQuerySchema,
   SendMessageSchema,
   type ChatDetailDto,
   type ChatMediaListQuery,
@@ -23,6 +24,8 @@ import {
   type MessageDto,
   type MessageListQuery,
   type MessageListResponse,
+  type MessageSearchPage,
+  type MessageSearchQuery,
   type SendMessageBody,
 } from '@scalechat/shared';
 import { z } from 'zod';
@@ -52,6 +55,25 @@ export class MessagesController {
     @Param('chatId', new ParseUUIDPipe({ version: '4' })) chatId: string
   ): Promise<ChatDetailDto> {
     return this.messages.getChat(user.sub, chatId);
+  }
+
+  /**
+   * `GET /chats/:chatId/messages/search?q=&cursor=&limit=`
+   * Case-insensitive substring search over message text in a chat.
+   * Excludes tombstones and messages before the caller's clearedAt.
+   * Results ordered sequence DESC; cursor-paginated.
+   *
+   * IMPORTANT: this handler MUST remain declared before `@Get('messages')` so
+   * NestJS/Fastify resolves `messages/search` as this route rather than
+   * treating "search" as a `:messageId`-style dynamic segment on the list route.
+   */
+  @Get('messages/search')
+  searchMessages(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('chatId', new ParseUUIDPipe({ version: '4' })) chatId: string,
+    @Query(new ZodValidationPipe(MessageSearchQuerySchema)) query: MessageSearchQuery,
+  ): Promise<MessageSearchPage> {
+    return this.messages.searchMessages(user.sub, chatId, query.q, query.cursor, query.limit);
   }
 
   @Get('messages')
