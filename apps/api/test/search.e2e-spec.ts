@@ -221,6 +221,45 @@ describe('GET /chats/:chatId/messages/search', () => {
     expect(wsRes.statusCode).toBe(400);
   });
 
+  // ─── Case 7 — LIKE wildcard escaping ────────────────────────────────────
+
+  it('Case 7 — LIKE metachar "_" matches only the literal char, not any char; "%" matches only literal "%"', async () => {
+    const chatId = await openChat(alice, bob);
+
+    // "userXname" should NOT match q=user_name (underscore is literal, not a
+    // wildcard for any single char).
+    await sendText(alice, chatId, 'call me at userXname');
+    // Only this message should match.
+    await sendText(bob, chatId, 'my handle is user_name');
+
+    const res = await authedInject(testApp, {
+      method: 'GET',
+      url: `/chats/${chatId}/messages/search?q=${encodeURIComponent('user_name')}`,
+      token: alice.accessToken,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ items: Array<{ snippet: string }> }>();
+    // Exactly one hit — the literal user_name message.
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0].snippet).toContain('user_name');
+
+    // Second assert: "%" does not act as a wildcard — "100 rupees" must NOT
+    // match q=100%.
+    const chatId2 = await openChat(alice, mallory);
+    await sendText(alice, chatId2, '100 rupees');
+
+    const res2 = await authedInject(testApp, {
+      method: 'GET',
+      url: `/chats/${chatId2}/messages/search?q=${encodeURIComponent('100%')}`,
+      token: alice.accessToken,
+    });
+
+    expect(res2.statusCode).toBe(200);
+    const body2 = res2.json<{ items: unknown[] }>();
+    expect(body2.items).toHaveLength(0);
+  });
+
   // ─── Case 6 — cross-page cursor pagination ───────────────────────────────
 
   it('Case 6 — keyset cursor paginates correctly across 25 messages (20+5, no overlap)', async () => {

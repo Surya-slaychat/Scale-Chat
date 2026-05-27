@@ -414,11 +414,16 @@ export class MessagesService {
 
     const c = decodeCursor(cursor, isSearchCursor);
 
+    // Escape LIKE metachars so '_' and '%' match literally (Prisma `contains` does not).
+    // Backslash first so the inserted escapes aren't themselves re-escaped. Prisma's
+    // ILIKE uses '\' as the escape char by default.
+    const escaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
+
     const rows = await this.prisma.message.findMany({
       where: {
         chatId,
         deletedAt: null,
-        text: { contains: q, mode: 'insensitive' },
+        text: { contains: escaped, mode: 'insensitive' },
         ...clearedFilter,
         ...(c ? { sequence: { lt: BigInt(c.sequence) } } : {}),
       },
