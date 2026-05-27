@@ -1,12 +1,13 @@
 /**
  * P2-Search — GET /chats/:chatId/messages/search e2e suite.
  *
- * 5 cases:
+ * 6 cases:
  *   1. Match found, case-insensitive
  *   2. Tombstoned message excluded (DELETE ?scope=everyone)
  *   3. Message before clear excluded; message after clear included
  *   4. Non-member → 403 not_a_member
  *   5. Empty q → 400
+ *   6. Cross-page cursor pagination — keyset correctness (25 messages, page 20 + page 5)
  */
 import {
   authedInject,
@@ -218,5 +219,66 @@ describe('GET /chats/:chatId/messages/search', () => {
       token: alice.accessToken,
     });
     expect(wsRes.statusCode).toBe(400);
+  });
+
+  // ─── Case 6 — cross-page cursor pagination ───────────────────────────────
+
+  it('Case 6 — keyset cursor paginates correctly across 25 messages (20+5, no overlap)', async () => {
+    const chatId = await openChat(alice, bob);
+
+    // Send 25 messages that all contain the unique token "pageword".
+    // Alternate senders so we exercise multi-sender searches.
+    const sentIds: string[] = [];
+    for (let i = 1; i <= 25; i++) {
+      const sender = i % 2 === 0 ? bob : alice;
+      const id = await sendText(sender, chatId, `pageword ${i}`);
+      sentIds.push(id);
+    }
+
+    // ── Page 1: limit=20 ─────────────────────────────────────────────────
+    const page1Res = await authedInject(testApp, {
+      method: 'GET',
+      url: `/chats/${chatId}/messages/search?q=pageword&limit=20`,
+      token: alice.accessToken,
+    });
+    expect(page1Res.statusCode).toBe(200);
+    const page1 = page1Res.json<{
+      items: Array<{ messageId: string; sequence: string; snippet: string }>;
+      meta: { nextCursor: string | null; hasMore: boolean };
+    }>();
+
+    expect(page1.items).toHaveLength(20);
+    expect(page1.meta.hasMore).toBe(true);
+    expect(page1.meta.nextCursor).not.toBeNull();
+
+    const page1Ids = new Set(page1.items.map((h) => h.messageId));
+
+    // ── Page 2: limit=20 with cursor from page 1 ─────────────────────────
+    const encodedCursor = encodeURIComponent(page1.meta.nextCursor!);
+    const page2Res = await authedInject(testApp, {
+      method: 'GET',
+      url: `/chats/${chatId}/messages/search?q=pageword&limit=20&cursor=${encodedCursor}`,
+      token: alice.accessToken,
+    });
+    expect(page2Res.statusCode).toBe(200);
+    const page2 = page2Res.json<{
+      items: Array<{ messageId: string; sequence: string; snippet: string }>;
+      meta: { nextCursor: string | null; hasMore: boolean };
+    }>();
+
+    expect(page2.items).toHaveLength(5);
+    expect(page2.meta.hasMore).toBe(false);
+    expect(page2.meta.nextCursor).toBeNull();
+
+    // Core keyset correctness: no message appears on both pages.
+    const page2Ids = page2.items.map((h) => h.messageId);
+    for (const id of page2Ids) {
+      expect(page1Ids.has(id)).toBe(false);
+    }
+
+    // All returned snippets must contain the search token.
+    for (const hit of [...page1.items, ...page2.items]) {
+      expect(hit.snippet.toLowerCase()).toContain('pageword');
+    }
   });
 });

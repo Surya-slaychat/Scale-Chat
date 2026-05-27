@@ -55,19 +55,37 @@ function isSearchCursor(raw: unknown): raw is SearchCursor {
  */
 function buildSnippet(text: string, q: string): string {
   const WINDOW = 20;
-  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  // Work in codepoint space (Array.from splits on full Unicode scalars, not
+  // UTF-16 code units) so we never split a surrogate pair mid-slice. This
+  // matters for Hindi text and emoji, both common on the India market.
+  const chars = Array.from(text);
+  const qChars = Array.from(q);
+
+  // Find the match position in codepoint space by scanning the lowercase
+  // codepoint arrays. This mirrors the case-insensitive DB match.
+  const lowerChars = chars.map((c) => c.toLowerCase());
+  const lowerQ = qChars.map((c) => c.toLowerCase());
+  let idx = -1;
+  outer: for (let i = 0; i <= chars.length - qChars.length; i++) {
+    for (let j = 0; j < lowerQ.length; j++) {
+      if (lowerChars[i + j] !== lowerQ[j]) continue outer;
+    }
+    idx = i;
+    break;
+  }
+
   if (idx === -1) {
     // Shouldn't happen (Postgres already matched this row), but fall back to
     // the start of the text.
-    return text.length > WINDOW * 2 + q.length
-      ? `${text.slice(0, WINDOW * 2 + q.length)}…`
-      : text;
+    const cap = WINDOW * 2 + qChars.length;
+    return chars.length > cap ? `${chars.slice(0, cap).join('')}…` : text;
   }
+
   const start = Math.max(0, idx - WINDOW);
-  const end = Math.min(text.length, idx + q.length + WINDOW);
+  const end = Math.min(chars.length, idx + qChars.length + WINDOW);
   const prefix = start > 0 ? '…' : '';
-  const suffix = end < text.length ? '…' : '';
-  return `${prefix}${text.slice(start, end)}${suffix}`;
+  const suffix = end < chars.length ? '…' : '';
+  return `${prefix}${chars.slice(start, end).join('')}${suffix}`;
 }
 
 type MessageRow = {
@@ -418,16 +436,14 @@ export class MessagesService {
     const items: MessageSearchHit[] = pageRows.map((r) => ({
       messageId: r.id,
       sequence: r.sequence.toString(),
-      snippet: buildSnippet(r.text ?? '', q),
+      snippet: buildSnippet(r.text!, q),
       createdAt: r.createdAt.toISOString(),
       senderUserId: r.senderUserId,
     }));
 
-    const lastRow = pageRows[pageRows.length - 1];
-    const nextCursor =
-      hasMore && lastRow
-        ? encodeCursor<SearchCursor>({ sequence: lastRow.sequence.toString() })
-        : null;
+    const nextCursor = hasMore
+      ? encodeCursor<SearchCursor>({ sequence: pageRows[pageRows.length - 1]!.sequence.toString() })
+      : null;
 
     return {
       items,
